@@ -133,6 +133,7 @@ export interface ServerToClientEvents {
 
 export interface ClientToServerEvents {
     message: (data: { sid: string; message: unknown; localId?: string }) => void
+    'sync-message': (data: { sid: string; message: unknown; localId?: string }) => void
     'session-alive': (data: {
         sid: string
         time: number

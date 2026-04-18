@@ -4,22 +4,10 @@ import { registerRoute } from 'workbox-routing'
 import { CacheFirst, NetworkFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { focusOrOpenNotificationUrl, type NotificationClientsLike } from './lib/notificationClick'
+import { buildNotificationOptions, type PushPayload } from './lib/pushNotification'
 
 declare const self: ServiceWorkerGlobalScope & {
     __WB_MANIFEST: Array<string | { url: string; revision?: string }>
-}
-
-type PushPayload = {
-    title: string
-    body?: string
-    icon?: string
-    badge?: string
-    tag?: string
-    data?: {
-        type?: string
-        sessionId?: string
-        url?: string
-    }
 }
 
 precacheAndRoute(self.__WB_MANIFEST)
@@ -99,20 +87,9 @@ self.addEventListener('push', (event) => {
     }
 
     const title = payload.title || 'HAPI'
-    const body = payload.body ?? ''
-    const icon = payload.icon ?? '/pwa-192x192.png'
-    const badge = payload.badge ?? '/pwa-64x64.png'
-    const data = payload.data
-    const tag = payload.tag
 
     event.waitUntil(
-        self.registration.showNotification(title, {
-            body,
-            icon,
-            badge,
-            data,
-            tag
-        })
+        self.registration.showNotification(title, buildNotificationOptions(payload))
     )
 })
 

@@ -40,6 +40,40 @@ const messageSchema = z.object({
     localId: z.string().optional()
 })
 
+function parseWireMessage(raw: unknown): unknown {
+    if (typeof raw !== 'string') {
+        return raw
+    }
+    try {
+        return JSON.parse(raw) as unknown
+    } catch {
+        return raw
+    }
+}
+
+function markPassiveSyncMessage(content: unknown): unknown {
+    if (!content || typeof content !== 'object' || Array.isArray(content)) {
+        return content
+    }
+
+    const record = content as Record<string, unknown>
+    if (record.role !== 'user' && record.role !== 'agent') {
+        return content
+    }
+
+    const meta = record.meta && typeof record.meta === 'object' && !Array.isArray(record.meta)
+        ? record.meta as Record<string, unknown>
+        : {}
+
+    return {
+        ...record,
+        meta: {
+            ...meta,
+            sentFrom: 'codex-desktop-sync'
+        }
+    }
+}
+
 const updateMetadataSchema = z.object({
     sid: z.string(),
     expectedVersion: z.number().int(),
@@ -65,24 +99,15 @@ export type SessionHandlersDeps = {
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
     const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionEnd, onWebappEvent, onBackgroundTaskDelta } = deps
 
-    socket.on('message', (data: unknown) => {
+    const handleMessage = (data: unknown, options: { broadcastToCli: boolean; passiveSync: boolean }) => {
         const parsed = messageSchema.safeParse(data)
         if (!parsed.success) {
             return
         }
 
         const { sid, localId } = parsed.data
-        const raw = parsed.data.message
-
-        const content = typeof raw === 'string'
-            ? (() => {
-                try {
-                    return JSON.parse(raw) as unknown
-                } catch {
-                    return raw
-                }
-            })()
-            : raw
+        const parsedContent = parseWireMessage(parsed.data.message)
+        const content = options.passiveSync ? markPassiveSyncMessage(parsedContent) : parsedContent
 
         const sessionAccess = resolveSessionAccess(sid)
         if (!sessionAccess.ok) {
@@ -133,7 +158,9 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 }
             }
         }
-        socket.to(`session:${sid}`).emit('update', update)
+        if (options.broadcastToCli) {
+            socket.to(`session:${sid}`).emit('update', update)
+        }
 
         onWebappEvent?.({
             type: 'message-received',
@@ -146,6 +173,14 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 createdAt: msg.createdAt
             }
         })
+    }
+
+    socket.on('message', (data: unknown) => {
+        handleMessage(data, { broadcastToCli: true, passiveSync: false })
+    })
+
+    socket.on('sync-message', (data: unknown) => {
+        handleMessage(data, { broadcastToCli: false, passiveSync: true })
     })
 
     const handleUpdateMetadata: UpdateMetadataHandler = (data, cb) => {

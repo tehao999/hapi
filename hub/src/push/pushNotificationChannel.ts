@@ -82,7 +82,8 @@ export class PushNotificationChannel implements NotificationChannel {
 
     private async deliver(session: Session, payload: PushPayload): Promise<void> {
         const url = payload.data?.url ?? this.buildSessionPath(session.id)
-        if (this.visibilityTracker.hasVisibleConnection(session.namespace)) {
+        const hasVisibleConnection = this.visibilityTracker.hasVisibleConnection(session.namespace)
+        if (hasVisibleConnection) {
             const delivered = await this.sseManager.sendToast(session.namespace, {
                 type: 'toast',
                 data: {

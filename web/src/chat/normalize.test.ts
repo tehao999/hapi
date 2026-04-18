@@ -343,6 +343,40 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('drops codex-synced subagent pseudo-user wrapper messages', () => {
+        const message: DecryptedMessage = {
+            ...makeMessage({
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: '<subagent_notification>\n{"status":"completed"}\n</subagent_notification>'
+                }
+            }),
+            localId: 'codex:thread-1:12:abc123'
+        }
+
+        expect(normalizeDecryptedMessage(message)).toBeNull()
+    })
+
+    it('keeps wrapper-like user text when it is not a codex sync artifact', () => {
+        const message = makeMessage({
+            role: 'user',
+            content: {
+                type: 'text',
+                text: '<subagent_notification>用户自己输入的文本</subagent_notification>'
+            }
+        })
+
+        expect(normalizeDecryptedMessage(message)).toMatchObject({
+            role: 'user',
+            isSidechain: false,
+            content: {
+                type: 'text',
+                text: '<subagent_notification>用户自己输入的文本</subagent_notification>'
+            }
+        })
+    })
+
     it('treats sidechain user output with mixed tool_result + text array as sidechain', () => {
         const message = makeMessage({
             role: 'agent',

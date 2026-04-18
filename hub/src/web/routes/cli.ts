@@ -28,10 +28,33 @@ const getMessagesQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(200).optional()
 })
 
+const PASSIVE_SYNC_SOURCES = new Set(['cli', 'codex-desktop-sync'])
+const PASSIVE_SYNC_LOCAL_ID_PREFIX = 'codex:'
+
 type CliEnv = {
     Variables: {
         namespace: string
     }
+}
+
+function getMessageSentFrom(content: unknown): string | null {
+    if (!content || typeof content !== 'object') {
+        return null
+    }
+    const meta = (content as { meta?: unknown }).meta
+    if (!meta || typeof meta !== 'object') {
+        return null
+    }
+    const sentFrom = (meta as { sentFrom?: unknown }).sentFrom
+    return typeof sentFrom === 'string' ? sentFrom : null
+}
+
+function isPassiveSyncBackfillMessage(message: { localId?: string | null; content: unknown }): boolean {
+    if (typeof message.localId === 'string' && message.localId.startsWith(PASSIVE_SYNC_LOCAL_ID_PREFIX)) {
+        return true
+    }
+    const sentFrom = getMessageSentFrom(message.content)
+    return sentFrom !== null && PASSIVE_SYNC_SOURCES.has(sentFrom)
 }
 
 function resolveSessionForNamespace(
@@ -147,7 +170,9 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         }
 
         const limit = parsed.data.limit ?? 200
-        const messages = engine.getMessagesAfter(resolved.sessionId, { afterSeq: parsed.data.afterSeq, limit })
+        const messages = engine
+            .getMessagesAfter(resolved.sessionId, { afterSeq: parsed.data.afterSeq, limit })
+            .filter((message) => !isPassiveSyncBackfillMessage(message))
         return c.json({ messages })
     })
 

@@ -47,6 +47,9 @@ const SYSTEM_INJECTION_PREFIXES = [
     '<system-reminder>',
 ]
 
+const PASSIVE_SYNC_SOURCES = new Set(['cli', 'codex-desktop-sync'])
+const PASSIVE_SYNC_LOCAL_ID_PREFIX = 'codex:'
+
 /**
  * Returns true if a JSONL message should be classified as a user-role message
  * (i.e., text typed by a real human) rather than an agent-role message.
@@ -259,7 +262,7 @@ export class ApiSessionClient extends EventEmitter {
         }
     }
 
-    private handleIncomingMessage(message: { seq?: number; content: unknown }): void {
+    private handleIncomingMessage(message: { seq?: number; localId?: string | null; content: unknown }): void {
         const seq = typeof message.seq === 'number' ? message.seq : null
         if (seq !== null) {
             if (this.lastSeenMessageSeq !== null && seq <= this.lastSeenMessageSeq) {
@@ -270,6 +273,12 @@ export class ApiSessionClient extends EventEmitter {
 
         const userResult = UserMessageSchema.safeParse(message.content)
         if (userResult.success) {
+            if (typeof message.localId === 'string' && message.localId.startsWith(PASSIVE_SYNC_LOCAL_ID_PREFIX)) {
+                return
+            }
+            if (userResult.data.meta?.sentFrom && PASSIVE_SYNC_SOURCES.has(userResult.data.meta.sentFrom)) {
+                return
+            }
             this.enqueueUserMessage(userResult.data)
             return
         }
