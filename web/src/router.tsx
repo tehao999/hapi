@@ -20,6 +20,7 @@ import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
+import { useResolveSendTargetSession } from '@/hooks/useResolveSendTargetSession'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useSession } from '@/hooks/queries/useSession'
@@ -233,6 +234,7 @@ function SessionPage() {
         flushPending,
         setAtBottom,
     } = useMessages(api, sessionId)
+    const { resolve: resolveSendTargetSession } = useResolveSendTargetSession(api, session)
     const {
         sendMessage,
         retryMessage,
@@ -241,23 +243,7 @@ function SessionPage() {
         onSuccess: (sentSessionId) => {
             clearDraftsAfterSend(sentSessionId, sessionId)
         },
-        resolveSessionId: async (currentSessionId) => {
-            if (!api || !session || session.active) {
-                return currentSessionId
-            }
-            try {
-                return await api.resumeSession(currentSessionId)
-            } catch (error) {
-                const message = error instanceof Error ? error.message : 'Resume failed'
-                addToast({
-                    title: 'Resume failed',
-                    body: message,
-                    sessionId: currentSessionId,
-                    url: ''
-                })
-                throw error
-            }
-        },
+        resolveSessionId: resolveSendTargetSession,
         onSessionResolved: (resolvedSessionId) => {
             void (async () => {
                 if (api) {

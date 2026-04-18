@@ -62,7 +62,7 @@ export function SessionChat(props: {
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const agentFlavor = props.session.metadata?.flavor ?? null
-    const desktopMirrorReadOnly = agentFlavor === 'codex' && isCodexDesktopMirrorSession({
+    const desktopMirrorSession = agentFlavor === 'codex' && isCodexDesktopMirrorSession({
         metadata: props.session.metadata,
         messages: props.messages
     })
@@ -308,17 +308,6 @@ export function SessionChat(props: {
     }, [navigate, props.session.id])
 
     const handleSend = useCallback((text: string, attachments?: AttachmentMetadata[]) => {
-        if (desktopMirrorReadOnly) {
-            haptic.notification('error')
-            addToast({
-                title: t('composer.codexDesktopSyncReadonly.title'),
-                body: t('composer.codexDesktopSyncReadonly.body'),
-                sessionId: props.session.id,
-                url: `/sessions/${props.session.id}`
-            })
-            return
-        }
-
         if (agentFlavor === 'codex') {
             const unsupportedCommand = findUnsupportedCodexBuiltinSlashCommand(
                 text,
@@ -338,7 +327,7 @@ export function SessionChat(props: {
 
         props.onSend(text, attachments)
         setForceScrollToken((token) => token + 1)
-    }, [desktopMirrorReadOnly, agentFlavor, props.availableSlashCommands, props.onSend, props.session.id, addToast, haptic, t])
+    }, [agentFlavor, props.availableSlashCommands, props.onSend, props.session.id, addToast, haptic, t])
 
     const attachmentAdapter = useMemo(() => {
         if (!props.session.active) {
@@ -379,7 +368,7 @@ export function SessionChat(props: {
                 </div>
             ) : null}
 
-            {desktopMirrorReadOnly ? (
+            {desktopMirrorSession ? (
                 <div className="px-3 pt-3">
                     <div className="mx-auto w-full max-w-content rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
                         <div className="font-medium text-[var(--app-text)]">

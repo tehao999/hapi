@@ -211,8 +211,8 @@ export default {
   'composer.voice': 'Voice assistant',
   'composer.codexSlashUnsupported.title': 'Codex command unavailable',
   'composer.codexSlashUnsupported.body': 'HAPI remote mode does not yet run built-in Codex slash commands like {command}. Use natural language instead, or run it in the local Codex TUI.',
-  'composer.codexDesktopSyncReadonly.title': 'Desktop-synced session is read-only',
-  'composer.codexDesktopSyncReadonly.body': 'This thread is mirroring a Codex desktop conversation. Sending from HAPI is blocked because two controllers on the same Codex thread can leave the run stuck. Continue on Codex desktop, or start a new native HAPI session.',
+  'composer.codexDesktopSyncReadonly.title': 'Desktop mirror session',
+  'composer.codexDesktopSyncReadonly.body': 'Sending from HAPI will take over this Codex thread once the desktop run is idle.',
 
   // Voice assistant
   'voice.connecting': 'Connecting...',
