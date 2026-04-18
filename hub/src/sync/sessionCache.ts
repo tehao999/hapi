@@ -583,6 +583,16 @@ export class SessionCache {
             changed = true
         }
 
+        if (oldObj.mirrorSource === 'codex-desktop-sync' && newObj.mirrorSource !== 'codex-desktop-sync') {
+            merged.mirrorSource = oldObj.mirrorSource
+            changed = true
+        }
+
+        if (oldObj.mirrorSource === 'codex-desktop-sync' && oldObj.executionControl !== undefined && newObj.executionControl === undefined) {
+            merged.executionControl = oldObj.executionControl
+            changed = true
+        }
+
         if (typeof oldObj.path === 'string' && typeof newObj.path !== 'string') {
             merged.path = oldObj.path
             changed = true

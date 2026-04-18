@@ -403,6 +403,7 @@ export class SyncEngine {
 
         const session = access.session
         const metadata = session.metadata
+        const sourceExecutionControl = getExecutionControl(metadata)
         const isDesktopMirror = isCodexDesktopMirrorSession({ metadata, messages: null })
 
         if (!isDesktopMirror) {
@@ -421,7 +422,12 @@ export class SyncEngine {
             await this.sessionCache.patchSessionMetadata(resumed.sessionId, namespace, (current) => ({
                 ...current,
                 mirrorSource: 'codex-desktop-sync',
-                executionControl: acquireRunnerControl(getExecutionControl(current), resumed.sessionId, Date.now(), 15 * 60_000)
+                executionControl: acquireRunnerControl(
+                    sourceExecutionControl ?? getExecutionControl(current),
+                    resumed.sessionId,
+                    Date.now(),
+                    15 * 60_000
+                )
             }))
         }
 
