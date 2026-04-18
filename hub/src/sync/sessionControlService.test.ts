@@ -19,6 +19,15 @@ describe('sessionControlService', () => {
         })
     })
 
+    it('accepts null control on first passive sync and initializes desktop mirror ownership', () => {
+        const now = 1_700_000_000_000
+
+        expect(shouldAcceptPassiveSync(null, undefined, now)).toEqual({
+            accepted: true,
+            nextControl: initializeDesktopMirrorControl(now)
+        })
+    })
+
     it('moves control to hapi-runner and bumps generation', () => {
         const desktop = initializeDesktopMirrorControl(10)
         const runner = acquireRunnerControl(desktop, 'session-runner', 110, 60_000)
