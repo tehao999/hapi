@@ -133,19 +133,21 @@ export interface ServerToClientEvents {
 
 export interface ClientToServerEvents {
     message: (data: { sid: string; message: unknown; localId?: string }) => void
-    'sync-message': (data: { sid: string; message: unknown; localId?: string }) => void
+    'sync-message': (data: { sid: string; message: unknown; localId?: string; source?: 'cli' | 'codex-desktop-sync'; generation?: number }) => void
     'session-alive': (data: {
         sid: string
         time: number
         thinking: boolean
         mode?: 'local' | 'remote'
+        source?: 'cli' | 'codex-desktop-sync'
+        generation?: number
         permissionMode?: PermissionMode
         model?: string | null
         modelReasoningEffort?: string | null
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
     }) => void
-    'session-end': (data: { sid: string; time: number }) => void
+    'session-end': (data: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync' }) => void
     'update-metadata': (data: { sid: string; expectedVersion: number; metadata: unknown }, cb: (answer: {
         result: 'error'
         reason?: SocketErrorReason

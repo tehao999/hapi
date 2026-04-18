@@ -19,6 +19,18 @@ export const WorktreeMetadataSchema = z.object({
 
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
+export const ExecutionControlOwnerSchema = z.enum(['desktop-sync', 'hapi-runner'])
+
+export const ExecutionControlSchema = z.object({
+    owner: ExecutionControlOwnerSchema,
+    generation: z.number().int().min(1),
+    leaseExpiresAt: z.number().nullable(),
+    runnerSessionId: z.string().nullable(),
+    updatedAt: z.number()
+})
+
+export type ExecutionControl = z.infer<typeof ExecutionControlSchema>
+
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
@@ -47,6 +59,7 @@ export const MetadataSchema = z.object({
     archivedBy: z.string().optional(),
     archiveReason: z.string().optional(),
     flavor: z.string().nullish(),
+    executionControl: ExecutionControlSchema.optional(),
     worktree: WorktreeMetadataSchema.optional()
 })
 

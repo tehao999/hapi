@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { isCodexDesktopMirrorSession } from './messages'
+import { getExecutionControl, isCodexDesktopMirrorSession } from './messages'
 
 describe('isCodexDesktopMirrorSession', () => {
     it('returns true when metadata is marked as a desktop mirror', () => {
@@ -47,5 +47,25 @@ describe('isCodexDesktopMirrorSession', () => {
                 }
             ]
         })).toBe(false)
+    })
+})
+
+it('reads persisted execution control from metadata', () => {
+    expect(getExecutionControl({
+        path: '/tmp/project',
+        host: 'localhost',
+        executionControl: {
+            owner: 'hapi-runner',
+            generation: 4,
+            leaseExpiresAt: 500,
+            runnerSessionId: 'session-runner',
+            updatedAt: 400
+        }
+    })).toEqual({
+        owner: 'hapi-runner',
+        generation: 4,
+        leaseExpiresAt: 500,
+        runnerSessionId: 'session-runner',
+        updatedAt: 400
     })
 })
