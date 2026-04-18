@@ -80,14 +80,21 @@ function createApp(args?: {
 }
 
 describe('messages routes', () => {
-    it('rejects sends for desktop-synced mirror sessions marked in metadata', async () => {
+    it('requires takeover before sends enter a desktop-owned mirror session', async () => {
         const { app, sendMessageCalls } = createApp({
             session: createSession({
                 metadata: {
                     path: '/tmp/project',
                     host: 'localhost',
                     flavor: 'codex',
-                    mirrorSource: 'codex-desktop-sync'
+                    mirrorSource: 'codex-desktop-sync',
+                    executionControl: {
+                        owner: 'desktop-sync',
+                        generation: 1,
+                        leaseExpiresAt: null,
+                        runnerSessionId: null,
+                        updatedAt: 1
+                    }
                 }
             })
         })
@@ -100,7 +107,8 @@ describe('messages routes', () => {
 
         expect(response.status).toBe(409)
         expect(await response.json()).toEqual({
-            error: 'Desktop-synced sessions are read-only in HAPI. Continue from Codex desktop or start a new HAPI session.'
+            error: 'Desktop-synced sessions must be taken over before sending from HAPI.',
+            code: 'desktop_takeover_required'
         })
         expect(sendMessageCalls).toEqual([])
     })
@@ -139,7 +147,8 @@ describe('messages routes', () => {
 
         expect(response.status).toBe(409)
         expect(await response.json()).toEqual({
-            error: 'Desktop-synced sessions are read-only in HAPI. Continue from Codex desktop or start a new HAPI session.'
+            error: 'Desktop-synced sessions must be taken over before sending from HAPI.',
+            code: 'desktop_takeover_required'
         })
         expect(sendMessageCalls).toEqual([])
     })

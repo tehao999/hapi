@@ -767,4 +767,58 @@ describe('session model', () => {
             expect(state.completedRequests?.['req-1']).toBeDefined()
         })
     })
+
+    it('takeoverSession spawns a new runner session for an idle desktop mirror', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const rpcGateway = {
+            spawnSession: async () => ({ type: 'success', sessionId: 'session-runner' as const })
+        }
+        const engine = new SyncEngine(
+            store,
+            null as never,
+            new RpcRegistry(),
+            { broadcast: () => undefined } as never
+        )
+        ;(engine as unknown as { eventPublisher: EventPublisher }).eventPublisher = createPublisher(events)
+        ;(engine as unknown as { rpcGateway: typeof rpcGateway }).rpcGateway = rpcGateway
+        const mirror = engine.getOrCreateSession(
+            'desktop-mirror',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                mirrorSource: 'codex-desktop-sync',
+                codexSessionId: 'thread-1',
+                executionControl: {
+                    owner: 'desktop-sync',
+                    generation: 1,
+                    leaseExpiresAt: null,
+                    runnerSessionId: null,
+                    updatedAt: 1
+                }
+            },
+            null,
+            'default',
+            'gpt-5.4'
+        )
+        engine.getOrCreateMachine('machine-1', { host: 'localhost' }, null, 'default')
+        engine.handleMachineAlive({ machineId: 'machine-1', time: Date.now() })
+
+        mirror.active = true
+        mirror.thinking = false
+        ;(engine as unknown as { waitForSessionActive: () => Promise<boolean> }).waitForSessionActive = async () => true
+        ;(engine as unknown as {
+            sessionCache: { mergeSessions: (oldSessionId: string, newSessionId: string, namespace: string) => Promise<void> }
+        }).sessionCache.mergeSessions = async () => undefined
+
+        try {
+            const result = await engine.takeoverSession(mirror.id, 'default')
+
+            expect(result).toEqual({ type: 'success', sessionId: 'session-runner' })
+        } finally {
+            engine.stop()
+        }
+    })
+
 })

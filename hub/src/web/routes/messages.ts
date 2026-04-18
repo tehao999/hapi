@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { isCodexDesktopMirrorSession } from '@hapi/protocol'
+import { getExecutionControl, isCodexDesktopMirrorSession } from '@hapi/protocol'
 import { AttachmentMetadataSchema } from '@hapi/protocol/schemas'
 import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
@@ -50,13 +50,18 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
         const sessionId = sessionResult.sessionId
         const recentMessages = engine.getMessagesPage(sessionId, { limit: 50, beforeSeq: null }).messages
+        const control = getExecutionControl(sessionResult.session.metadata)
 
-        if (isCodexDesktopMirrorSession({
-            metadata: sessionResult.session.metadata,
-            messages: recentMessages
-        })) {
+        if (
+            isCodexDesktopMirrorSession({
+                metadata: sessionResult.session.metadata,
+                messages: recentMessages
+            })
+            && control?.owner !== 'hapi-runner'
+        ) {
             return c.json({
-                error: 'Desktop-synced sessions are read-only in HAPI. Continue from Codex desktop or start a new HAPI session.'
+                error: 'Desktop-synced sessions must be taken over before sending from HAPI.',
+                code: 'desktop_takeover_required'
             }, 409)
         }
 

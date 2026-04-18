@@ -233,4 +233,67 @@ describe('sessions routes', () => {
             ['session-1', { effort: 'max' }]
         ])
     })
+
+    it('takes over an active desktop mirror session when it is idle', async () => {
+        const session = createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                mirrorSource: 'codex-desktop-sync',
+                codexSessionId: 'thread-1',
+                executionControl: {
+                    owner: 'desktop-sync',
+                    generation: 1,
+                    leaseExpiresAt: null,
+                    runnerSessionId: null,
+                    updatedAt: 1
+                }
+            },
+            active: true,
+            thinking: false
+        })
+        const takeoverCalls: string[] = []
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
+            takeoverSession: async (sessionId: string) => {
+                takeoverCalls.push(sessionId)
+                return { type: 'success', sessionId: 'session-runner' as const }
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions/session-1/takeover', { method: 'POST' })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ type: 'success', sessionId: 'session-runner' })
+        expect(takeoverCalls).toEqual(['session-1'])
+    })
+
+    it('returns 409 when desktop mirror takeover is attempted while the desktop turn is still running', async () => {
+        const session = createSession({ thinking: true })
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
+            takeoverSession: async () => ({ type: 'error', code: 'takeover_busy' as const, message: 'Desktop session is still running' })
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions/session-1/takeover', { method: 'POST' })
+
+        expect(response.status).toBe(409)
+        expect(await response.json()).toEqual({ error: 'Desktop session is still running', code: 'takeover_busy' })
+    })
+
 })

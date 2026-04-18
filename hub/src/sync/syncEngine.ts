@@ -7,6 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
+import { getExecutionControl, isCodexDesktopMirrorSession } from '@hapi/protocol'
 import type { CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import type { Server } from 'socket.io'
 import type { Store } from '../store'
@@ -24,6 +25,7 @@ import {
     type RpcReadFileResponse,
     type RpcUploadFileResponse
 } from './rpcGateway'
+import { acquireRunnerControl } from './sessionControlService'
 import { SessionCache } from './sessionCache'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
@@ -41,6 +43,10 @@ export type {
 export type ResumeSessionResult =
     | { type: 'success'; sessionId: string }
     | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'no_machine_online' | 'resume_unavailable' | 'resume_failed' }
+
+type TakeoverSessionResult =
+    | { type: 'success'; sessionId: string }
+    | { type: 'error'; message: string; code: 'access_denied' | 'session_not_found' | 'resume_unavailable' | 'resume_failed' | 'no_machine_online' | 'takeover_busy' }
 
 export class SyncEngine {
     private readonly eventPublisher: EventPublisher
@@ -382,8 +388,53 @@ export class SyncEngine {
             }
         }
 
+        return this.resumeAccessibleSession(access, namespace)
+    }
+
+    async takeoverSession(sessionId: string, namespace: string): Promise<TakeoverSessionResult> {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) {
+            return {
+                type: 'error',
+                message: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found',
+                code: access.reason === 'access-denied' ? 'access_denied' : 'session_not_found'
+            }
+        }
+
         const session = access.session
-        if (session.active) {
+        const metadata = session.metadata
+        const isDesktopMirror = isCodexDesktopMirrorSession({ metadata, messages: null })
+
+        if (!isDesktopMirror) {
+            return session.active ? { type: 'success', sessionId: access.sessionId } : await this.resumeAccessibleSession(access, namespace)
+        }
+        if (session.thinking) {
+            return { type: 'error', message: 'Desktop session is still running', code: 'takeover_busy' }
+        }
+
+        const resumed = await this.resumeAccessibleSession(access, namespace, { allowActiveSession: true })
+        if (resumed.type === 'error') {
+            return resumed
+        }
+
+        if (this.getSession(resumed.sessionId)) {
+            await this.sessionCache.patchSessionMetadata(resumed.sessionId, namespace, (current) => ({
+                ...current,
+                mirrorSource: 'codex-desktop-sync',
+                executionControl: acquireRunnerControl(getExecutionControl(current), resumed.sessionId, Date.now(), 15 * 60_000)
+            }))
+        }
+
+        return resumed
+    }
+
+    private async resumeAccessibleSession(
+        access: { ok: true; sessionId: string; session: Session },
+        namespace: string,
+        options?: { allowActiveSession?: boolean }
+    ): Promise<ResumeSessionResult> {
+        const session = access.session
+        if (session.active && !options?.allowActiveSession) {
             return { type: 'success', sessionId: access.sessionId }
         }
 

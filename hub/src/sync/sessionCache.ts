@@ -383,6 +383,37 @@ export class SessionCache {
         this.refreshSession(sessionId)
     }
 
+    async patchSessionMetadata(
+        sessionId: string,
+        namespace: string,
+        updater: (metadata: Record<string, unknown>) => Record<string, unknown>
+    ): Promise<void> {
+        const session = this.resolveSessionAccess(sessionId, namespace)
+        if (!session.ok) {
+            throw new Error('Session not found')
+        }
+
+        const currentMetadata = (session.session.metadata ?? { path: '', host: '' }) as Record<string, unknown>
+        const nextMetadata = updater(currentMetadata)
+        const result = this.store.sessions.updateSessionMetadata(
+            sessionId,
+            nextMetadata,
+            session.session.metadataVersion,
+            namespace,
+            { touchUpdatedAt: false }
+        )
+
+        if (result.result !== 'success') {
+            throw new Error(
+                result.result === 'version-mismatch'
+                    ? 'Session was modified concurrently. Please try again.'
+                    : 'Failed to update session metadata'
+            )
+        }
+
+        this.refreshSession(sessionId)
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         const session = this.sessions.get(sessionId)
         if (!session) {
