@@ -13,6 +13,9 @@ const VISIBLE_CLAUDE_SYSTEM_SUBTYPES = new Set([
     'compact_boundary'
 ])
 
+export const CODEX_DESKTOP_SYNC_SOURCE = 'codex-desktop-sync'
+export const CODEX_DESKTOP_SYNC_LOCAL_ID_PREFIX = 'codex:'
+
 export function isRoleWrappedRecord(value: unknown): value is RoleWrappedRecord {
     if (!isObject(value)) return false
     return typeof value.role === 'string' && 'content' in value
@@ -48,6 +51,43 @@ export function isClaudeChatVisibleMessage(message: { type: unknown; subtype?: u
     }
 
     return isClaudeChatVisibleSystemSubtype(message.subtype)
+}
+
+export function isCodexDesktopSyncMessageEnvelope(message: {
+    localId?: string | null
+    content: unknown
+}): boolean {
+    if (typeof message.localId === 'string' && message.localId.startsWith(CODEX_DESKTOP_SYNC_LOCAL_ID_PREFIX)) {
+        return true
+    }
+
+    const record = unwrapRoleWrappedRecordEnvelope(message.content)
+    if (!record) {
+        return false
+    }
+
+    const meta = isObject(record.meta) ? record.meta : null
+    return meta?.sentFrom === CODEX_DESKTOP_SYNC_SOURCE
+}
+
+export function isCodexDesktopMirrorSession(args: {
+    metadata?: unknown | null
+    messages?: Array<{
+        localId?: string | null
+        content: unknown
+    }> | null
+}): boolean {
+    if (isObject(args.metadata) && args.metadata.mirrorSource === CODEX_DESKTOP_SYNC_SOURCE) {
+        return true
+    }
+
+    for (const message of args.messages ?? []) {
+        if (isCodexDesktopSyncMessageEnvelope(message)) {
+            return true
+        }
+    }
+
+    return false
 }
 
 export type { RoleWrappedRecord }

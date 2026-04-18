@@ -56,7 +56,24 @@ function createHarness() {
     const socket = new FakeSocket()
     const storedMessages: Array<{ sid: string; content: unknown; localId?: string }> = []
     const webappEvents: WebappEvent[] = []
+    const metadataUpdates: Array<{
+        sid: string
+        metadata: unknown
+        expectedVersion: number
+        namespace: string
+        options?: { touchUpdatedAt?: boolean }
+    }> = []
     let seq = 0
+    const session = {
+        namespace: 'default',
+        metadataVersion: 3,
+        metadata: {
+            path: '/tmp/project',
+            host: 'localhost',
+            flavor: 'codex'
+        },
+        teamState: null
+    }
     const store = {
         messages: {
             addMessage(sid: string, content: unknown, localId?: string) {
@@ -73,7 +90,23 @@ function createHarness() {
         },
         sessions: {
             getSession() {
-                return { namespace: 'default', teamState: null }
+                return session
+            },
+            updateSessionMetadata(
+                sid: string,
+                metadata: unknown,
+                expectedVersion: number,
+                namespace: string,
+                options?: { touchUpdatedAt?: boolean }
+            ) {
+                metadataUpdates.push({ sid, metadata, expectedVersion, namespace, options })
+                session.metadata = metadata as typeof session.metadata
+                session.metadataVersion += 1
+                return {
+                    result: 'success',
+                    version: session.metadataVersion,
+                    value: metadata
+                }
             },
             setSessionTodos() {
                 return null
@@ -86,7 +119,7 @@ function createHarness() {
 
     registerSessionHandlers(socket as unknown as CliSocketWithData, {
         store: store as never,
-        resolveSessionAccess: () => ({ ok: true, value: { namespace: 'default' } as StoredSession }),
+        resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
         emitAccessError: () => {
             throw new Error('Unexpected access error')
         },
@@ -95,7 +128,7 @@ function createHarness() {
         }
     })
 
-    return { socket, storedMessages, webappEvents }
+    return { socket, storedMessages, webappEvents, metadataUpdates }
 }
 
 describe('cli session handlers', () => {
@@ -120,7 +153,7 @@ describe('cli session handlers', () => {
     })
 
     it('stores passive sync messages for web without broadcasting them to CLI executors', () => {
-        const { socket, storedMessages, webappEvents } = createHarness()
+        const { socket, storedMessages, webappEvents, metadataUpdates } = createHarness()
 
         socket.trigger('sync-message', {
             sid: 'session-1',
@@ -137,9 +170,27 @@ describe('cli session handlers', () => {
             content: { type: 'text', text: 'message typed in Codex desktop' },
             meta: { sentFrom: 'codex-desktop-sync' }
         })
-        expect(socket.roomEmits).toEqual([])
-        expect(webappEvents).toHaveLength(1)
-        expect(webappEvents[0]?.type).toBe('message-received')
+        expect(socket.roomEmits).toHaveLength(1)
+        expect(socket.roomEmits[0]?.room).toBe('session:session-1')
+        expect(socket.roomEmits[0]?.event).toBe('update')
+        expect(webappEvents).toHaveLength(2)
+        expect(webappEvents[0]?.type).toBe('session-updated')
         expect(webappEvents[0]?.sessionId).toBe('session-1')
+        expect(webappEvents[1]?.type).toBe('message-received')
+        expect(webappEvents[1]?.sessionId).toBe('session-1')
+        expect(metadataUpdates).toEqual([
+            {
+                sid: 'session-1',
+                metadata: {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'codex',
+                    mirrorSource: 'codex-desktop-sync'
+                },
+                expectedVersion: 3,
+                namespace: 'default',
+                options: { touchUpdatedAt: false }
+            }
+        ])
     })
 })

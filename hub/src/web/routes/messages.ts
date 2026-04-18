@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { isCodexDesktopMirrorSession } from '@hapi/protocol'
 import { AttachmentMetadataSchema } from '@hapi/protocol/schemas'
 import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
@@ -48,6 +49,16 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return sessionResult
         }
         const sessionId = sessionResult.sessionId
+        const recentMessages = engine.getMessagesPage(sessionId, { limit: 50, beforeSeq: null }).messages
+
+        if (isCodexDesktopMirrorSession({
+            metadata: sessionResult.session.metadata,
+            messages: recentMessages
+        })) {
+            return c.json({
+                error: 'Desktop-synced sessions are read-only in HAPI. Continue from Codex desktop or start a new HAPI session.'
+            }, 409)
+        }
 
         const body = await c.req.json().catch(() => null)
         const parsed = sendMessageBodySchema.safeParse(body)

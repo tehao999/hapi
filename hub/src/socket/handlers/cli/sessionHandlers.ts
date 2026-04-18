@@ -1,3 +1,4 @@
+import { CODEX_DESKTOP_SYNC_SOURCE, isObject } from '@hapi/protocol'
 import type { ClientToServerEvents } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
@@ -69,7 +70,7 @@ function markPassiveSyncMessage(content: unknown): unknown {
         ...record,
         meta: {
             ...meta,
-            sentFrom: 'codex-desktop-sync'
+            sentFrom: CODEX_DESKTOP_SYNC_SOURCE
         }
     }
 }
@@ -115,6 +116,35 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
         const session = sessionAccess.value
+
+        if (options.passiveSync && isObject(session.metadata) && session.metadata.mirrorSource !== CODEX_DESKTOP_SYNC_SOURCE) {
+            const metadata = {
+                ...session.metadata,
+                mirrorSource: CODEX_DESKTOP_SYNC_SOURCE
+            }
+            const result = store.sessions.updateSessionMetadata(
+                sid,
+                metadata,
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+            if (result.result === 'success') {
+                const update = {
+                    id: randomUUID(),
+                    seq: Date.now(),
+                    createdAt: Date.now(),
+                    body: {
+                        t: 'update-session' as const,
+                        sid,
+                        metadata: { version: result.version, value: metadata },
+                        agentState: null
+                    }
+                }
+                socket.to(`session:${sid}`).emit('update', update)
+                onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { sid } })
+            }
+        }
 
         const msg = store.messages.addMessage(sid, content, localId)
 

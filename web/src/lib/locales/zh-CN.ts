@@ -213,6 +213,8 @@ export default {
   'composer.voice': '语音助手',
   'composer.codexSlashUnsupported.title': '无法执行 Codex 命令',
   'composer.codexSlashUnsupported.body': 'HAPI 远程模式暂不支持 {command} 这类 Codex 内建 slash command，请改用自然语言，或在本地 Codex TUI 中执行。',
+  'composer.codexDesktopSyncReadonly.title': '桌面同步会话为只读',
+  'composer.codexDesktopSyncReadonly.body': '这个线程正在镜像 Codex 桌面对话。HAPI 侧发送会和桌面端同时控制同一个 Codex thread，容易把执行卡住。请回到 Codex 桌面端继续，或新建一个原生 HAPI 会话。',
 
   // Voice assistant
   'voice.connecting': '连接中...',

@@ -11,7 +11,11 @@ export type PushPayload = {
     }
 }
 
-export function buildNotificationOptions(payload: PushPayload): NotificationOptions {
+export type PushNotificationOptions = NotificationOptions & {
+    renotify?: boolean
+}
+
+export function buildNotificationOptions(payload: PushPayload): PushNotificationOptions {
     const icon = payload.icon ?? '/pwa-192x192.png'
     const badge = payload.badge ?? '/pwa-64x64.png'
     const data = payload.data
