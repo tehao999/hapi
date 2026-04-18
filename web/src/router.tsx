@@ -20,7 +20,7 @@ import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
-import { useResolveSendTargetSession } from '@/hooks/useResolveSendTargetSession'
+import { getResolveSendTargetSessionFailureToast, useResolveSendTargetSession, describeResolveSendTargetSession } from '@/hooks/useResolveSendTargetSession'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useSession } from '@/hooks/queries/useSession'
@@ -234,7 +234,8 @@ function SessionPage() {
         flushPending,
         setAtBottom,
     } = useMessages(api, sessionId)
-    const { resolve: resolveSendTargetSession } = useResolveSendTargetSession(api, session)
+    const { action: sendTargetResolutionAction } = describeResolveSendTargetSession(session, messages)
+    const { resolve: resolveSendTargetSession } = useResolveSendTargetSession(api, session, messages)
     const {
         sendMessage,
         retryMessage,
@@ -243,7 +244,22 @@ function SessionPage() {
         onSuccess: (sentSessionId) => {
             clearDraftsAfterSend(sentSessionId, sessionId)
         },
-        resolveSessionId: resolveSendTargetSession,
+        resolveSessionId: async (currentSessionId) => {
+            try {
+                return await resolveSendTargetSession(currentSessionId)
+            } catch (error) {
+                if (sendTargetResolutionAction !== 'none') {
+                    const toast = getResolveSendTargetSessionFailureToast(sendTargetResolutionAction, error)
+                    addToast({
+                        title: toast.title,
+                        body: toast.body,
+                        sessionId: currentSessionId,
+                        url: ''
+                    })
+                }
+                throw error
+            }
+        },
         onSessionResolved: (resolvedSessionId) => {
             void (async () => {
                 if (api) {
