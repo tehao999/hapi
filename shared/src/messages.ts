@@ -1,5 +1,5 @@
 import { isObject } from './utils'
-import type { ExecutionControl } from './schemas'
+import { ExecutionControlSchema, type ExecutionControl } from './schemas'
 
 type RoleWrappedRecord = {
     role: string
@@ -96,18 +96,8 @@ export function getExecutionControl(metadata: unknown | null | undefined): Execu
         return null
     }
 
-    const control = metadata.executionControl as Record<string, unknown>
-    if ((control.owner !== 'desktop-sync' && control.owner !== 'hapi-runner') || typeof control.generation !== 'number') {
-        return null
-    }
-
-    return {
-        owner: control.owner,
-        generation: control.generation,
-        leaseExpiresAt: typeof control.leaseExpiresAt === 'number' ? control.leaseExpiresAt : null,
-        runnerSessionId: typeof control.runnerSessionId === 'string' ? control.runnerSessionId : null,
-        updatedAt: typeof control.updatedAt === 'number' ? control.updatedAt : 0
-    }
+    const parsed = ExecutionControlSchema.safeParse(metadata.executionControl)
+    return parsed.success ? parsed.data : null
 }
 
 export type { RoleWrappedRecord }

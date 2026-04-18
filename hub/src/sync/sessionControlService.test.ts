@@ -40,6 +40,38 @@ describe('sessionControlService', () => {
         expect(shouldAcceptPassiveSync(runner, 2, 120).accepted).toBe(false)
     })
 
+    it('rejects generation mismatches after runner lease expiry', () => {
+        const desktop = initializeDesktopMirrorControl(10)
+        const runner = acquireRunnerControl(desktop, 'session-runner', 110, 60_000)
+
+        expect(shouldAcceptPassiveSync(runner, 999, 60_111).accepted).toBe(false)
+    })
+
+    it('accepts passive sync while preserving desktop ownership', () => {
+        const desktop = initializeDesktopMirrorControl(10)
+
+        expect(shouldAcceptPassiveSync(desktop, 1, 120)).toEqual({
+            accepted: true,
+            nextControl: desktop
+        })
+    })
+
+    it('accepts passive sync and releases expired runner ownership', () => {
+        const desktop = initializeDesktopMirrorControl(10)
+        const runner = acquireRunnerControl(desktop, 'session-runner', 110, 60_000)
+
+        expect(shouldAcceptPassiveSync(runner, 2, 60_111)).toEqual({
+            accepted: true,
+            nextControl: {
+                owner: 'desktop-sync',
+                generation: 3,
+                leaseExpiresAt: null,
+                runnerSessionId: null,
+                updatedAt: 60_111
+            }
+        })
+    })
+
     it('returns control to desktop sync on release and bumps generation again', () => {
         const desktop = initializeDesktopMirrorControl(10)
         const runner = acquireRunnerControl(desktop, 'session-runner', 110, 60_000)
