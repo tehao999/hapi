@@ -128,7 +128,7 @@ function createHarness() {
         }
     })
 
-    return { socket, storedMessages, webappEvents, metadataUpdates }
+    return { socket, storedMessages, webappEvents, metadataUpdates, session }
 }
 
 describe('cli session handlers', () => {
@@ -178,19 +178,56 @@ describe('cli session handlers', () => {
         expect(webappEvents[0]?.sessionId).toBe('session-1')
         expect(webappEvents[1]?.type).toBe('message-received')
         expect(webappEvents[1]?.sessionId).toBe('session-1')
-        expect(metadataUpdates).toEqual([
-            {
-                sid: 'session-1',
-                metadata: {
-                    path: '/tmp/project',
-                    host: 'localhost',
-                    flavor: 'codex',
-                    mirrorSource: 'codex-desktop-sync'
-                },
-                expectedVersion: 3,
-                namespace: 'default',
-                options: { touchUpdatedAt: false }
+        expect(metadataUpdates).toHaveLength(1)
+        expect(metadataUpdates[0]).toMatchObject({
+            sid: 'session-1',
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                mirrorSource: 'codex-desktop-sync',
+                executionControl: {
+                    owner: 'desktop-sync',
+                    generation: 1,
+                    leaseExpiresAt: null,
+                    runnerSessionId: null
+                }
+            },
+            expectedVersion: 3,
+            namespace: 'default',
+            options: { touchUpdatedAt: false }
+        })
+        expect(typeof (metadataUpdates[0]?.metadata as { executionControl?: { updatedAt?: unknown } }).executionControl?.updatedAt).toBe('number')
+    })
+
+    it('drops passive sync writes when hapi-runner owns the lease', () => {
+        const { socket, storedMessages, metadataUpdates, session } = createHarness()
+
+        session.metadata = {
+            ...session.metadata,
+            mirrorSource: 'codex-desktop-sync',
+            executionControl: {
+                owner: 'hapi-runner',
+                generation: 1,
+                leaseExpiresAt: Date.now() + 60_000,
+                runnerSessionId: 'session-runner',
+                updatedAt: Date.now()
             }
-        ])
+        }
+
+        metadataUpdates.length = 0
+        socket.trigger('sync-message', {
+            sid: 'session-1',
+            source: 'codex-desktop-sync',
+            generation: 1,
+            localId: 'codex:thread-1:99:stale',
+            message: {
+                role: 'agent',
+                content: { type: 'codex', data: { type: 'message', message: 'stale mirror replay' } }
+            }
+        })
+
+        expect(storedMessages).toHaveLength(0)
+        expect(metadataUpdates).toHaveLength(0)
     })
 })

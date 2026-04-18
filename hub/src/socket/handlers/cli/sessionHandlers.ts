@@ -1,10 +1,11 @@
-import { CODEX_DESKTOP_SYNC_SOURCE, isObject } from '@hapi/protocol'
+import { CODEX_DESKTOP_SYNC_SOURCE, getExecutionControl, isObject } from '@hapi/protocol'
 import type { ClientToServerEvents } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
+import { shouldAcceptPassiveSync } from '../../../sync/sessionControlService'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
@@ -38,7 +39,9 @@ type UpdateStateHandler = ClientToServerEvents['update-state']
 const messageSchema = z.object({
     sid: z.string(),
     message: z.union([z.string(), z.unknown()]),
-    localId: z.string().optional()
+    localId: z.string().optional(),
+    source: z.enum(['cli', 'codex-desktop-sync']).optional(),
+    generation: z.number().int().min(1).optional()
 })
 
 function parseWireMessage(raw: unknown): unknown {
@@ -117,32 +120,44 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
         const session = sessionAccess.value
 
-        if (options.passiveSync && isObject(session.metadata) && session.metadata.mirrorSource !== CODEX_DESKTOP_SYNC_SOURCE) {
-            const metadata = {
-                ...session.metadata,
-                mirrorSource: CODEX_DESKTOP_SYNC_SOURCE
+        if (options.passiveSync) {
+            const control = getExecutionControl(session.metadata)
+            const verdict = shouldAcceptPassiveSync(control, parsed.data.generation, Date.now())
+            if (!verdict.accepted) {
+                return
             }
-            const result = store.sessions.updateSessionMetadata(
-                sid,
-                metadata,
-                session.metadataVersion,
-                session.namespace,
-                { touchUpdatedAt: false }
-            )
-            if (result.result === 'success') {
-                const update = {
-                    id: randomUUID(),
-                    seq: Date.now(),
-                    createdAt: Date.now(),
-                    body: {
-                        t: 'update-session' as const,
-                        sid,
-                        metadata: { version: result.version, value: metadata },
-                        agentState: null
-                    }
+
+            const needsMirrorSource = !isObject(session.metadata) || session.metadata.mirrorSource !== CODEX_DESKTOP_SYNC_SOURCE
+            const needsExecutionControl = verdict.nextControl !== null && verdict.nextControl !== control
+
+            if (needsMirrorSource || needsExecutionControl) {
+                const metadata = {
+                    ...(isObject(session.metadata) ? session.metadata : {}),
+                    mirrorSource: CODEX_DESKTOP_SYNC_SOURCE,
+                    ...(verdict.nextControl ? { executionControl: verdict.nextControl } : {})
                 }
-                socket.to(`session:${sid}`).emit('update', update)
-                onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { sid } })
+                const result = store.sessions.updateSessionMetadata(
+                    sid,
+                    metadata,
+                    session.metadataVersion,
+                    session.namespace,
+                    { touchUpdatedAt: false }
+                )
+                if (result.result === 'success') {
+                    const update = {
+                        id: randomUUID(),
+                        seq: Date.now(),
+                        createdAt: Date.now(),
+                        body: {
+                            t: 'update-session' as const,
+                            sid,
+                            metadata: { version: result.version, value: metadata },
+                            agentState: null
+                        }
+                    }
+                    socket.to(`session:${sid}`).emit('update', update)
+                    onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { sid } })
+                }
             }
         }
 
