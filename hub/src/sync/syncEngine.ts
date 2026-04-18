@@ -409,6 +409,9 @@ export class SyncEngine {
         if (!isDesktopMirror) {
             return session.active ? { type: 'success', sessionId: access.sessionId } : await this.resumeAccessibleSession(access, namespace)
         }
+        if (session.active && sourceExecutionControl?.owner === 'hapi-runner') {
+            return { type: 'success', sessionId: access.sessionId }
+        }
         if (session.thinking) {
             return { type: 'error', message: 'Desktop session is still running', code: 'takeover_busy' }
         }
@@ -419,19 +422,44 @@ export class SyncEngine {
         }
 
         if (this.getSession(resumed.sessionId)) {
-            await this.sessionCache.patchSessionMetadata(resumed.sessionId, namespace, (current) => ({
-                ...current,
-                mirrorSource: 'codex-desktop-sync',
-                executionControl: acquireRunnerControl(
-                    sourceExecutionControl ?? getExecutionControl(current),
-                    resumed.sessionId,
-                    Date.now(),
-                    15 * 60_000
-                )
-            }))
+            const patchResult = await this.patchTakeoverMetadata(resumed.sessionId, namespace, sourceExecutionControl)
+            if (patchResult.type === 'error') {
+                return patchResult
+            }
         }
 
         return resumed
+    }
+
+    private async patchTakeoverMetadata(
+        sessionId: string,
+        namespace: string,
+        sourceExecutionControl: ReturnType<typeof getExecutionControl>
+    ): Promise<{ type: 'success' } | { type: 'error'; message: string; code: 'resume_failed' }> {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+                await this.sessionCache.patchSessionMetadata(sessionId, namespace, (current) => ({
+                    ...current,
+                    mirrorSource: 'codex-desktop-sync',
+                    executionControl: acquireRunnerControl(
+                        sourceExecutionControl ?? getExecutionControl(current),
+                        sessionId,
+                        Date.now(),
+                        15 * 60_000
+                    )
+                }))
+                return { type: 'success' }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Failed to update session metadata'
+                if (message === 'Session was modified concurrently. Please try again.' && attempt === 0) {
+                    this.sessionCache.refreshSession(sessionId)
+                    continue
+                }
+                return { type: 'error', message, code: 'resume_failed' }
+            }
+        }
+
+        return { type: 'error', message: 'Failed to update session metadata', code: 'resume_failed' }
     }
 
     private async resumeAccessibleSession(

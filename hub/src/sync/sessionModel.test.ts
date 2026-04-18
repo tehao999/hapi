@@ -823,6 +823,20 @@ describe('session model', () => {
         )
         engine.getOrCreateMachine('machine-1', { host: 'localhost' }, null, 'default')
         engine.handleMachineAlive({ machineId: 'machine-1', time: Date.now() })
+        const sessionCache = (engine as unknown as { sessionCache: SessionCache }).sessionCache
+        const actualPatchSessionMetadata = sessionCache.patchSessionMetadata.bind(sessionCache)
+        let patchAttempts = 0
+        sessionCache.patchSessionMetadata = async (sessionId, namespace, updater) => {
+            patchAttempts += 1
+            if (patchAttempts === 1) {
+                await actualPatchSessionMetadata(sessionId, namespace, (current) => ({
+                    ...current,
+                    name: 'runner updated concurrently'
+                }))
+                throw new Error('Session was modified concurrently. Please try again.')
+            }
+            return actualPatchSessionMetadata(sessionId, namespace, updater)
+        }
 
         mirror.active = true
         mirror.thinking = false
@@ -840,8 +854,62 @@ describe('session model', () => {
                 generation: 8,
                 runnerSessionId: runner.id
             })
+            expect(canonical?.metadata?.name).toBe('runner updated concurrently')
             expect(typeof control?.leaseExpiresAt).toBe('number')
             expect((control?.leaseExpiresAt ?? 0) > Date.now()).toBe(true)
+            expect(patchAttempts).toBe(2)
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('takeoverSession is idempotent for an active mirror already owned by hapi-runner', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const engine = new SyncEngine(
+            store,
+            null as never,
+            new RpcRegistry(),
+            { broadcast: () => undefined } as never
+        )
+        ;(engine as unknown as { eventPublisher: EventPublisher }).eventPublisher = createPublisher(events)
+        const spawnCalls: string[] = []
+        const rpcGateway = {
+            spawnSession: async () => {
+                spawnCalls.push('spawn')
+                return { type: 'success', sessionId: 'unexpected-runner' as const }
+            }
+        }
+        ;(engine as unknown as { rpcGateway: typeof rpcGateway }).rpcGateway = rpcGateway
+        const mirror = engine.getOrCreateSession(
+            'desktop-mirror-owned-by-runner',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                mirrorSource: 'codex-desktop-sync',
+                codexSessionId: 'thread-1',
+                executionControl: {
+                    owner: 'hapi-runner',
+                    generation: 8,
+                    leaseExpiresAt: Date.now() + 60_000,
+                    runnerSessionId: 'runner-session',
+                    updatedAt: 8
+                }
+            },
+            null,
+            'default',
+            'gpt-5.4'
+        )
+
+        mirror.active = true
+        mirror.thinking = false
+
+        try {
+            const result = await engine.takeoverSession(mirror.id, 'default')
+
+            expect(result).toEqual({ type: 'success', sessionId: mirror.id })
+            expect(spawnCalls).toEqual([])
         } finally {
             engine.stop()
         }

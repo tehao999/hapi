@@ -113,6 +113,43 @@ describe('messages routes', () => {
         expect(sendMessageCalls).toEqual([])
     })
 
+    it('allows sends for mirror sessions after takeover gives ownership to hapi-runner', async () => {
+        const { app, sendMessageCalls } = createApp({
+            session: createSession({
+                metadata: {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'codex',
+                    mirrorSource: 'codex-desktop-sync',
+                    executionControl: {
+                        owner: 'hapi-runner',
+                        generation: 2,
+                        leaseExpiresAt: 60_000,
+                        runnerSessionId: 'session-1',
+                        updatedAt: 2
+                    }
+                }
+            })
+        })
+
+        const response = await app.request('/api/sessions/session-1/messages', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: 'hello from hapi' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ ok: true })
+        expect(sendMessageCalls).toEqual([
+            ['session-1', {
+                text: 'hello from hapi',
+                localId: undefined,
+                attachments: undefined,
+                sentFrom: 'webapp'
+            }]
+        ])
+    })
+
     it('rejects sends for sessions whose recent messages were mirrored from Codex desktop', async () => {
         const { app, sendMessageCalls } = createApp({
             recentMessages: [
