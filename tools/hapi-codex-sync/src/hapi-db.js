@@ -31,6 +31,36 @@ function findHapiSessionByCodexId(dbPath, codexSessionId) {
   };
 }
 
+function updateSessionMetadata(dbPath, sessionId, metadata, expectedVersion) {
+  const version = Number(expectedVersion);
+  if (!Number.isInteger(version) || version < 1) {
+    throw new Error('expectedVersion must be a positive integer');
+  }
+
+  const metadataJson = JSON.stringify(metadata);
+  sqliteExec(dbPath, `
+    update sessions
+    set metadata = ${sqlString(metadataJson)}, metadata_version = metadata_version + 1
+    where id = ${sqlString(sessionId)} and metadata_version = ${version};
+  `);
+
+  const rows = sqliteJson(dbPath, `
+    select metadata, metadata_version
+    from sessions
+    where id = ${sqlString(sessionId)}
+    limit 1
+  `);
+  if (rows.length === 0) return { result: 'error' };
+
+  const value = rows[0].metadata ? JSON.parse(rows[0].metadata) : null;
+  const currentVersion = Number(rows[0].metadata_version || 0);
+  if (currentVersion !== version + 1 || JSON.stringify(value) !== metadataJson) {
+    return { result: 'version-mismatch', version: currentVersion, metadata: value };
+  }
+
+  return { result: 'success', version: currentVersion, metadata: value };
+}
+
 function comparableMessage(message) {
   return JSON.stringify({ role: message.role, content: message.content });
 }
@@ -268,6 +298,7 @@ function insertMessageIfMissing(dbPath, { sessionId, localId, createdAt, message
 
 module.exports = {
   findHapiSessionByCodexId,
+  updateSessionMetadata,
   insertMessageIfMissing,
   sqliteJson,
   sqliteExec,

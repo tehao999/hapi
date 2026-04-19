@@ -107,3 +107,54 @@ test('socket sink returns hub rejection acks to the watcher', async () => {
 
   assert.deepEqual(result, { inserted: false, reason: 'stale-generation' });
 });
+
+test('socket sink sends metadata updates through the live HAPI socket', async () => {
+  const emitted = [];
+  const fakeSocket = {
+    connected: false,
+    on(event, handler) {
+      if (event === 'connect') this._connect = handler;
+      return this;
+    },
+    emit(event, payload, cb) {
+      emitted.push({ event, payload });
+      if (event === 'update-metadata') {
+        cb?.({ result: 'success', version: 3, metadata: payload.metadata });
+      } else {
+        cb?.({ ok: true });
+      }
+    },
+    disconnect() {}
+  };
+
+  const sink = createCliMessageSink({
+    hubUrl: 'http://127.0.0.1:3006',
+    token: 'secret:default',
+    sessionId: 'session-1',
+    generation: 7,
+    ioFactory() {
+      queueMicrotask(() => fakeSocket._connect());
+      return fakeSocket;
+    }
+  });
+
+  await sink.open();
+  const result = await sink.updateMetadata({
+    sid: 'session-1',
+    expectedVersion: 2,
+    metadata: { path: '/tmp/project', host: 'mac', title: 'Codex Desktop Thread Title' }
+  });
+  await sink.close();
+
+  const update = emitted.find((entry) => entry.event === 'update-metadata');
+  assert.deepEqual(update.payload, {
+    sid: 'session-1',
+    expectedVersion: 2,
+    metadata: { path: '/tmp/project', host: 'mac', title: 'Codex Desktop Thread Title' }
+  });
+  assert.deepEqual(result, {
+    result: 'success',
+    version: 3,
+    metadata: { path: '/tmp/project', host: 'mac', title: 'Codex Desktop Thread Title' }
+  });
+});

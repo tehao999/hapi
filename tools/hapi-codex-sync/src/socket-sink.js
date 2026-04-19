@@ -99,6 +99,20 @@ function createCliMessageSink({
       return ack;
     },
 
+    async updateMetadata({ sid, metadata, expectedVersion }) {
+      if (!socket) throw new Error('socket sink is not open');
+      emitSessionAlive();
+      const ack = await emitWithAck(socket, 'update-metadata', {
+        sid,
+        metadata,
+        expectedVersion
+      }, ackTimeoutMs);
+      if (!ack || typeof ack !== 'object' || typeof ack.result !== 'string') {
+        throw new Error('Invalid update-metadata ack from HAPI hub');
+      }
+      return ack;
+    },
+
     async close() {
       if (socket) {
         socket.emit('session-end', {

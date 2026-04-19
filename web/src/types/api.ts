@@ -27,6 +27,7 @@ export type SessionMetadataSummary = {
     host: string
     version?: string
     name?: string
+    title?: string
     os?: string
     summary?: { text: string; updatedAt: number }
     machineId?: string

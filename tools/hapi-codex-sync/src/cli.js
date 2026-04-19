@@ -1,7 +1,7 @@
 const path = require('node:path');
 const { importRolloutFile } = require('./importer');
 const { getCodexThread } = require('./codex-db');
-const { findHapiSessionByCodexId } = require('./hapi-db');
+const { findHapiSessionByCodexId, updateSessionMetadata } = require('./hapi-db');
 const { createCliMessageSink } = require('./socket-sink');
 const { readCliApiToken } = require('./hapi-settings');
 const { resolveBindingChange } = require('./session-binding');
@@ -63,6 +63,57 @@ function getRolloutPathForThread(opts) {
   return thread.rolloutPath;
 }
 
+function normalizeCodexThreadTitle(title) {
+  const text = typeof title === 'string' ? title.trim() : '';
+  return text.length > 0 ? text : null;
+}
+
+function applyCodexThreadTitle(metadata, title) {
+  const normalized = normalizeCodexThreadTitle(title);
+  if (!normalized) return { changed: false, metadata };
+  const current = metadata && typeof metadata === 'object' ? metadata : {};
+  if (current.title === normalized) return { changed: false, metadata: current };
+  return {
+    changed: true,
+    metadata: {
+      ...current,
+      title: normalized
+    }
+  };
+}
+
+async function syncCodexThreadTitle({ hapiDb, session, thread, sink, updateMetadataFn = updateSessionMetadata }) {
+  const titleUpdate = applyCodexThreadTitle(session?.metadata, thread?.title);
+  if (!titleUpdate.changed) return { changed: false };
+
+  const expectedVersion = Number(session?.metadata_version || session?.metadataVersion || 0);
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    return { changed: false, reason: 'missing-metadata-version' };
+  }
+
+  if (sink && typeof sink.updateMetadata === 'function') {
+    const ack = await sink.updateMetadata({
+      sid: session.id,
+      metadata: titleUpdate.metadata,
+      expectedVersion
+    });
+    return {
+      changed: ack?.result === 'success',
+      result: ack?.result,
+      version: ack?.version,
+      metadata: ack?.metadata
+    };
+  }
+
+  const result = updateMetadataFn(hapiDb, session.id, titleUpdate.metadata, expectedVersion);
+  return {
+    changed: result?.result === 'success',
+    result: result?.result,
+    version: result?.version,
+    metadata: result?.metadata
+  };
+}
+
 async function withOptionalSocketSink(opts, fn) {
   if (opts.delivery !== 'socket') return fn(null);
   const session = findHapiSessionByCodexId(opts.hapiDb, opts.threadId);
@@ -99,12 +150,17 @@ async function importFile(opts) {
 }
 
 async function runWatchIteration(opts, state = {}, deps = {}) {
-  const rolloutPath = state.rolloutPath ?? getRolloutPathForThread(opts);
+  const getThread = deps.getThread ?? getCodexThread;
+  const shouldReadThread = Boolean(deps.getThread || opts.codexDb);
+  const thread = shouldReadThread ? getThread(opts.codexDb, opts.threadId) : null;
+  if (shouldReadThread && !thread) throw new Error(`Codex thread not found: ${opts.threadId}`);
+  const rolloutPath = state.rolloutPath ?? thread?.rolloutPath ?? getRolloutPathForThread(opts);
   const findSession = deps.findSession ?? findHapiSessionByCodexId;
   const readToken = deps.readToken ?? readCliApiToken;
   const createSink = deps.createSink ?? createCliMessageSink;
   const importWithSink = deps.importWithSink ?? importRolloutFile.withSink;
   const importDirect = deps.importDirect ?? importRolloutFile;
+  const updateMetadataFn = deps.updateMetadata ?? updateSessionMetadata;
 
   let currentBinding = state.currentBinding ?? null;
   let currentSink = state.currentSink ?? null;
@@ -132,6 +188,16 @@ async function runWatchIteration(opts, state = {}, deps = {}) {
     currentBinding = binding.next;
   }
 
+  const titleSync = thread
+    ? await syncCodexThreadTitle({
+        hapiDb: opts.hapiDb,
+        session,
+        thread,
+        sink: currentSink,
+        updateMetadataFn
+      })
+    : { changed: false };
+
   const args = {
     hapiDbPath: opts.hapiDb,
     threadId: opts.threadId,
@@ -142,16 +208,18 @@ async function runWatchIteration(opts, state = {}, deps = {}) {
   const stats = currentSink ? await importWithSink({ ...args, sink: currentSink }) : importDirect(args);
   const nextFromLine = Number.isInteger(stats?.nextFromLine) ? stats.nextFromLine : opts.fromLine + stats.read;
   const report = stats.read > 0
-    ? { ...stats, nextFromLine, delivery: opts.delivery, mode: opts.mode, binding: currentBinding }
+    ? { ...stats, nextFromLine, delivery: opts.delivery, mode: opts.mode, binding: currentBinding, titleSync }
     : null;
 
   return {
     rolloutPath,
+    thread,
     currentBinding,
     currentSink,
     nextFromLine,
     stats,
-    report
+    report,
+    titleSync
   };
 }
 
@@ -200,5 +268,8 @@ module.exports = {
   DEFAULT_HAPI_DB,
   DEFAULT_CODEX_DB,
   DEFAULT_HAPI_SETTINGS,
-  DEFAULT_HUB_URL
+  DEFAULT_HUB_URL,
+  normalizeCodexThreadTitle,
+  applyCodexThreadTitle,
+  syncCodexThreadTitle
 };

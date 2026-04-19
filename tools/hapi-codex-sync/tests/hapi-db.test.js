@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { findHapiSessionByCodexId, insertMessageIfMissing } = require('../src/hapi-db');
+const { findHapiSessionByCodexId, updateSessionMetadata, insertMessageIfMissing } = require('../src/hapi-db');
 
 function tempDb() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hapi-db-test-'));
@@ -67,6 +67,31 @@ test('findHapiSessionByCodexId returns the newest canonical session with generat
   assert.equal(session.id, 'hapi-2');
   assert.equal(session.metadata.executionControl.generation, 3);
   assert.equal(session.metadata.executionControl.owner, 'hapi-runner');
+});
+
+test('updates session metadata with optimistic version check', () => {
+  const dbPath = tempDb();
+  const result = updateSessionMetadata(dbPath, 'hapi-1', {
+    codexSessionId: 'codex-1',
+    path: '/tmp/project',
+    flavor: 'codex',
+    title: 'Codex Desktop Thread Title'
+  }, 1);
+
+  assert.equal(result.result, 'success');
+  assert.equal(result.version, 2);
+  assert.equal(result.metadata.title, 'Codex Desktop Thread Title');
+
+  const stale = updateSessionMetadata(dbPath, 'hapi-1', {
+    codexSessionId: 'codex-1',
+    path: '/tmp/project',
+    flavor: 'codex',
+    title: 'Stale Title'
+  }, 1);
+
+  assert.equal(stale.result, 'version-mismatch');
+  assert.equal(stale.version, 2);
+  assert.equal(stale.metadata.title, 'Codex Desktop Thread Title');
 });
 
 test('inserts message idempotently and updates session seq and updated_at', () => {

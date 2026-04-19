@@ -118,3 +118,76 @@ test('watch iteration rotates the socket sink on generation changes and respects
   assert.equal(second.nextFromLine, 3);
   assert.deepEqual(second.report?.binding, { sessionId: 'session-1', generation: 2 });
 });
+
+test('watch iteration pushes Codex thread title into HAPI metadata over the live socket', async () => {
+  const metadataUpdates = [];
+  const opts = {
+    threadId: 'abc',
+    codexDb: '/tmp/codex.db',
+    hapiDb: '/tmp/hapi.db',
+    hapiSettings: '/tmp/settings.json',
+    hubUrl: 'http://127.0.0.1:3006',
+    namespace: 'default',
+    delivery: 'socket',
+    mode: 'all',
+    fromLine: 1
+  };
+
+  const deps = {
+    getThread() {
+      return {
+        id: 'abc',
+        rolloutPath: '/tmp/rollout.jsonl',
+        title: 'Codex Desktop Thread Title',
+        cwd: '/tmp/project',
+        updatedAtMs: 1234
+      };
+    },
+    findSession() {
+      return {
+        id: 'session-1',
+        metadata_version: 4,
+        metadata: {
+          path: '/tmp/project',
+          host: 'mac',
+          name: 'Manual HAPI Name',
+          mirrorSource: 'codex-desktop-sync',
+          summary: { text: 'Changing summary', updatedAt: 99 },
+          executionControl: { generation: 3 }
+        }
+      };
+    },
+    readToken() {
+      return 'secret:default';
+    },
+    createSink() {
+      return {
+        async open() {},
+        async close() {},
+        async updateMetadata(payload) {
+          metadataUpdates.push(payload);
+          return { result: 'success', version: 5, metadata: payload.metadata };
+        }
+      };
+    },
+    async importWithSink() {
+      return {
+        read: 0,
+        converted: 0,
+        inserted: 0,
+        skipped: 0,
+        missingSession: false,
+        nextFromLine: 1
+      };
+    }
+  };
+
+  await runWatchIteration({ ...opts }, { currentBinding: null, currentSink: null }, deps);
+
+  assert.equal(metadataUpdates.length, 1);
+  assert.equal(metadataUpdates[0].sid, 'session-1');
+  assert.equal(metadataUpdates[0].expectedVersion, 4);
+  assert.equal(metadataUpdates[0].metadata.title, 'Codex Desktop Thread Title');
+  assert.equal(metadataUpdates[0].metadata.name, 'Manual HAPI Name');
+  assert.deepEqual(metadataUpdates[0].metadata.summary, { text: 'Changing summary', updatedAt: 99 });
+});
