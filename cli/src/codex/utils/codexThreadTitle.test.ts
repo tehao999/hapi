@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +7,7 @@ import {
     applyCodexThreadTitleToMetadata,
     applyHapiTitleToMetadata,
     createCodexThreadTitlePoller,
+    readCodexThreadTitle,
     writeCodexThreadTitle,
     syncHapiMetadataTitleToCodexThread,
     syncCodexThreadTitleToMetadata
@@ -88,6 +89,36 @@ describe('Codex thread title sync', () => {
         }]);
     });
 
+    it('reads the latest Codex desktop thread name from session_index.jsonl', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'codex-thread-title-test-'));
+        try {
+            const dbPath = join(dir, 'state_5.sqlite');
+            const sessionIndexPath = join(dir, 'session_index.jsonl');
+            execFileSync('sqlite3', [dbPath, `
+                create table threads (
+                    id text primary key,
+                    title text,
+                    updated_at_ms integer
+                );
+                insert into threads (id, title, updated_at_ms)
+                values ('thread-1', 'SQLite Title', 1000);
+            `]);
+            execFileSync('sqlite3', [dbPath, 'select 1;']);
+            writeFileSync(sessionIndexPath, [
+                JSON.stringify({
+                    id: 'thread-1',
+                    thread_name: 'Desktop App Title',
+                    updated_at: '2026-04-19T10:16:17.131288Z'
+                }),
+                ''
+            ].join('\n'));
+
+            expect(readCodexThreadTitle('thread-1', { dbPath, sessionIndexPath })).toBe('Desktop App Title');
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it('stores HAPI title changes in the shared Codex title field and clears stale HAPI-only names', () => {
         expect(applyHapiTitleToMetadata({
             path: '/repo',
@@ -142,6 +173,7 @@ describe('Codex thread title sync', () => {
 
             expect(writeCodexThreadTitle('thread-1', 'First Shared Title', {
                 dbPath,
+                sessionIndexPath: join(dir, 'session_index.jsonl'),
                 nowMs: 12_345
             })).toBe(true);
 
@@ -155,6 +187,16 @@ describe('Codex thread title sync', () => {
                 title: 'First Shared Title',
                 updated_at: 12,
                 updated_at_ms: 12_345
+            }]);
+
+            const sessionIndexLines = readFileSync(join(dir, 'session_index.jsonl'), 'utf8')
+                .trim()
+                .split('\n')
+                .map((line) => JSON.parse(line));
+            expect(sessionIndexLines).toEqual([{
+                id: 'thread-1',
+                thread_name: 'First Shared Title',
+                updated_at: '1970-01-01T00:00:12.345Z'
             }]);
         } finally {
             rmSync(dir, { recursive: true, force: true });

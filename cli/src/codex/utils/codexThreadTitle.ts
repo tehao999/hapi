@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Metadata } from '@/api/types';
 
 type MetadataUpdater = {
@@ -18,6 +18,10 @@ function sqlString(value: string): string {
 
 export function getDefaultCodexStateDbPath(env: NodeJS.ProcessEnv = process.env): string {
     return join(env.CODEX_HOME || join(homedir(), '.codex'), 'state_5.sqlite');
+}
+
+export function getDefaultCodexSessionIndexPath(env: NodeJS.ProcessEnv = process.env): string {
+    return join(env.CODEX_HOME || join(homedir(), '.codex'), 'session_index.jsonl');
 }
 
 export function normalizeCodexThreadTitle(title: unknown): string | null {
@@ -41,9 +45,66 @@ export function getHapiMetadataTitleForCodex(metadata: Metadata | null | undefin
     return normalizeCodexThreadTitle(metadata.title ?? metadata.name);
 }
 
+function parseCodexSessionIndexUpdatedAtMs(value: unknown): number | null {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.replace(/\.(\d{3})\d+Z$/, '.$1Z');
+    const parsed = Date.parse(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getCodexSessionIndexPath(dbPath: string, sessionIndexPath?: string): string {
+    return sessionIndexPath ?? (
+        dbPath === getDefaultCodexStateDbPath()
+            ? getDefaultCodexSessionIndexPath()
+            : join(dirname(dbPath), 'session_index.jsonl')
+    );
+}
+
+function readCodexSessionIndexThreadTitle(
+    threadId: string,
+    sessionIndexPath: string
+): { title: string; updatedAtMs: number } | null {
+    if (!threadId || !existsSync(sessionIndexPath)) {
+        return null;
+    }
+
+    try {
+        const lines = readFileSync(sessionIndexPath, 'utf8').trimEnd().split('\n');
+        for (let index = lines.length - 1; index >= 0; index -= 1) {
+            const line = lines[index]?.trim();
+            if (!line) {
+                continue;
+            }
+            let parsed: { id?: unknown; thread_name?: unknown; updated_at?: unknown };
+            try {
+                parsed = JSON.parse(line) as { id?: unknown; thread_name?: unknown; updated_at?: unknown };
+            } catch {
+                continue;
+            }
+            if (parsed.id !== threadId) {
+                continue;
+            }
+            const title = normalizeCodexThreadTitle(parsed.thread_name);
+            if (!title) {
+                continue;
+            }
+            return {
+                title,
+                updatedAtMs: parseCodexSessionIndexUpdatedAtMs(parsed.updated_at) ?? 0
+            };
+        }
+    } catch {
+        return null;
+    }
+
+    return null;
+}
+
 export function readCodexThreadTitle(
     threadId: string,
-    options?: { dbPath?: string }
+    options?: { dbPath?: string; sessionIndexPath?: string }
 ): string | null {
     const dbPath = options?.dbPath ?? getDefaultCodexStateDbPath();
     if (!threadId || !existsSync(dbPath)) {
@@ -51,6 +112,14 @@ export function readCodexThreadTitle(
     }
 
     try {
+        const sessionIndexTitle = readCodexSessionIndexThreadTitle(
+            threadId,
+            getCodexSessionIndexPath(dbPath, options?.sessionIndexPath)
+        );
+        if (sessionIndexTitle) {
+            return sessionIndexTitle.title;
+        }
+
         const output = execFileSync('sqlite3', [
             '-json',
             dbPath,
@@ -73,7 +142,7 @@ export function readCodexThreadTitle(
 export function writeCodexThreadTitle(
     threadId: string,
     title: string,
-    options?: { dbPath?: string; nowMs?: number }
+    options?: { dbPath?: string; sessionIndexPath?: string; nowMs?: number }
 ): boolean {
     const normalized = normalizeCodexThreadTitle(title);
     const dbPath = options?.dbPath ?? getDefaultCodexStateDbPath();
@@ -83,6 +152,7 @@ export function writeCodexThreadTitle(
 
     const nowMs = options?.nowMs ?? Date.now();
     const nowSeconds = Math.floor(nowMs / 1000);
+    const sessionIndexPath = getCodexSessionIndexPath(dbPath, options?.sessionIndexPath);
 
     try {
         const output = execFileSync('sqlite3', [
@@ -100,7 +170,18 @@ export function writeCodexThreadTitle(
         }).trim();
 
         const rows = output ? JSON.parse(output) as Array<{ changes?: unknown }> : [];
-        return Number(rows[0]?.changes ?? 0) > 0;
+        const sqliteChanged = Number(rows[0]?.changes ?? 0) > 0;
+        const latestIndexTitle = readCodexSessionIndexThreadTitle(threadId, sessionIndexPath);
+        const indexChanged = latestIndexTitle?.title !== normalized;
+        if (indexChanged) {
+            mkdirSync(dirname(sessionIndexPath), { recursive: true });
+            appendFileSync(sessionIndexPath, JSON.stringify({
+                id: threadId,
+                thread_name: normalized,
+                updated_at: new Date(nowMs).toISOString()
+            }) + '\n');
+        }
+        return sqliteChanged || indexChanged;
     } catch {
         return false;
     }

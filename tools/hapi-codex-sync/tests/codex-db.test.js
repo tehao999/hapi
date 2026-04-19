@@ -23,6 +23,28 @@ test('reads Codex thread rollout path from state sqlite', () => {
   assert.equal(getCodexThread(dbPath, 'missing'), null);
 });
 
+test('prefers the latest Codex desktop thread name from session_index.jsonl', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-db-test-'));
+  const dbPath = path.join(dir, 'state_5.sqlite');
+  const sessionIndexPath = path.join(dir, 'session_index.jsonl');
+  execFileSync('sqlite3', [dbPath, `
+    create table threads (id text primary key, rollout_path text not null, title text not null, cwd text not null, updated_at_ms integer not null);
+    insert into threads (id, rollout_path, title, cwd, updated_at_ms) values ('thread-1','/tmp/rollout.jsonl','SQLite Title','/tmp/project',1000);
+  `]);
+  fs.writeFileSync(sessionIndexPath, [
+    JSON.stringify({ id: 'thread-1', thread_name: 'Desktop App Title', updated_at: '2026-04-19T10:16:17.131288Z' }),
+    ''
+  ].join('\n'));
+
+  assert.deepEqual(getCodexThread(dbPath, 'thread-1'), {
+    id: 'thread-1',
+    rolloutPath: '/tmp/rollout.jsonl',
+    title: 'Desktop App Title',
+    cwd: '/tmp/project',
+    updatedAtMs: 1776593777131
+  });
+});
+
 test('writes a Codex thread title when the existing title is null', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-db-test-'));
   const dbPath = path.join(dir, 'state_5.sqlite');
@@ -50,5 +72,15 @@ test('writes a Codex thread title when the existing title is null', () => {
     title: 'First Shared Title',
     updated_at: 12,
     updated_at_ms: 12345
+  }]);
+
+  const sessionIndexLines = fs.readFileSync(path.join(dir, 'session_index.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(sessionIndexLines, [{
+    id: 'thread-1',
+    thread_name: 'First Shared Title',
+    updated_at: '1970-01-01T00:00:12.345Z'
   }]);
 });
