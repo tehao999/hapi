@@ -7,6 +7,7 @@ import { convertCodexEvent } from './utils/codexEventConverter';
 import { buildHapiMcpBridge } from './utils/buildHapiMcpBridge';
 import { stripCodexCliOverrides } from './utils/codexCliOverrides';
 import { buildCodexPermissionModeCliArgs } from './utils/permissionModeConfig';
+import { syncCodexThreadTitleToMetadata } from './utils/codexThreadTitle';
 import { BaseLocalLauncher } from '@/modules/common/launcher/BaseLocalLauncher';
 
 export async function codexLocalLauncher(session: CodexSession): Promise<'switch' | 'exit'> {
@@ -29,6 +30,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
 
     const handleSessionFound = (sessionId: string) => {
         session.onSessionFound(sessionId);
+        void syncCodexThreadTitleToMetadata(session.client, sessionId);
         scanner?.onNewSession(sessionId);
     };
 
@@ -74,13 +76,12 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
         startupTimestampMs: Date.now(),
         onSessionMatchFailed: handleSessionMatchFailed,
         onSessionFound: (sessionId) => {
-            session.onSessionFound(sessionId);
+            handleSessionFound(sessionId);
         },
         onEvent: (event) => {
             const converted = convertCodexEvent(event);
             if (converted?.sessionId) {
-                session.onSessionFound(converted.sessionId);
-                scanner?.onNewSession(converted.sessionId);
+                handleSessionFound(converted.sessionId);
             }
             if (converted?.userMessage) {
                 session.sendUserMessage(converted.userMessage);

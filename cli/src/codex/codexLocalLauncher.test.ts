@@ -3,12 +3,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const harness = vi.hoisted(() => ({
     launches: [] as Array<Record<string, unknown>>,
     sessionScannerCalls: [] as Array<Record<string, unknown>>,
-    scannerFailureMessage: 'No Codex session found within 120000ms for cwd c:\\workspace\\project; refusing fallback.'
+    scannerFailureMessage: 'No Codex session found within 120000ms for cwd c:\\workspace\\project; refusing fallback.',
+    localSessionIdToEmit: null as string | null,
+    titleSyncCalls: [] as string[]
 }));
 
 vi.mock('./codexLocal', () => ({
     codexLocal: async (opts: Record<string, unknown>) => {
         harness.launches.push(opts);
+        if (harness.localSessionIdToEmit) {
+            (opts.onSessionFound as ((sessionId: string) => void) | undefined)?.(harness.localSessionIdToEmit);
+        }
     }
 }));
 
@@ -34,6 +39,13 @@ vi.mock('./utils/codexSessionScanner', () => ({
                 opts.onSessionMatchFailed?.(harness.scannerFailureMessage);
             }
         };
+    }
+}));
+
+vi.mock('./utils/codexThreadTitle', () => ({
+    syncCodexThreadTitleToMetadata: async (_client: unknown, threadId: string) => {
+        harness.titleSyncCalls.push(threadId);
+        return true;
     }
 }));
 
@@ -76,7 +88,8 @@ function createSessionStub(permissionMode: 'default' | 'read-only' | 'safe-yolo'
             client: {
                 rpcHandlerManager: {
                     registerHandler: () => {}
-                }
+                },
+                updateMetadata: () => {}
             },
             getPermissionMode: () => permissionMode,
             getModelReasoningEffort: () => null,
@@ -100,6 +113,8 @@ describe('codexLocalLauncher', () => {
     afterEach(() => {
         harness.launches = [];
         harness.sessionScannerCalls = [];
+        harness.localSessionIdToEmit = null;
+        harness.titleSyncCalls = [];
     });
 
     it('rebuilds approval and sandbox args from yolo mode', async () => {
@@ -124,6 +139,15 @@ describe('codexLocalLauncher', () => {
             '--model',
             'o3'
         ]);
+    });
+
+    it('syncs the Codex desktop title after the local Codex session id is discovered', async () => {
+        harness.localSessionIdToEmit = 'thread-local';
+        const { session } = createSessionStub('default');
+
+        await codexLocalLauncher(session as never);
+
+        expect(harness.titleSyncCalls).toContain('thread-local');
     });
 
     it('preserves raw Codex approval flags in default mode', async () => {

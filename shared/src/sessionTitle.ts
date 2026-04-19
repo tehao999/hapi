@@ -6,6 +6,8 @@ type SessionTitleMetadata = {
     path?: string | null
     summary?: { text?: string | null } | null
     mirrorSource?: string | null
+    flavor?: string | null
+    codexSessionId?: string | null
 }
 
 export function getSessionDisplayTitle(session: {
@@ -16,8 +18,10 @@ export function getSessionDisplayTitle(session: {
     if (metadata?.name) return metadata.name
     if (metadata?.title) return metadata.title
 
-    const isDesktopMirror = metadata?.mirrorSource === CODEX_DESKTOP_SYNC_SOURCE
-    if (!isDesktopMirror && metadata?.summary?.text) {
+    const isCodexBackedSession = metadata?.mirrorSource === CODEX_DESKTOP_SYNC_SOURCE
+        || metadata?.flavor === 'codex'
+        || Boolean(metadata?.codexSessionId)
+    if (!isCodexBackedSession && metadata?.summary?.text) {
         return metadata.summary.text
     }
 

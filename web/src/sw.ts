@@ -5,7 +5,7 @@ import { CacheFirst, NetworkFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { focusOrOpenNotificationUrl, type NotificationClientsLike } from './lib/notificationClick'
 import { getBadgeCountFromPushPayload, updateAppBadge, type AppBadgeTarget } from './lib/appBadge'
-import { buildNotificationOptions, type PushPayload } from './lib/pushNotification'
+import { buildNotificationOptions, shouldShowPushNotification, type PushPayload } from './lib/pushNotification'
 
 declare const self: ServiceWorkerGlobalScope & {
     __WB_MANIFEST: Array<string | { url: string; revision?: string }>
@@ -101,7 +101,11 @@ self.addEventListener('push', (event) => {
     event.waitUntil(
         Promise.all([
             updateAppBadge(navigator as unknown as AppBadgeTarget, badgeCount),
-            self.registration.showNotification(title, buildNotificationOptions(payload))
+            shouldShowPushNotification(self.clients).then((shouldShow) => (
+                shouldShow
+                    ? self.registration.showNotification(title, buildNotificationOptions(payload))
+                    : undefined
+            ))
         ]).then(() => undefined)
     )
 })

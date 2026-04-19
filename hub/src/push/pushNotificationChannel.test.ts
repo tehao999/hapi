@@ -77,7 +77,7 @@ function createChannel() {
 }
 
 describe('PushNotificationChannel', () => {
-    it('sends foreground toast and skips Web Push when visible toast is delivered', async () => {
+    it('sends foreground toast and still sends Web Push when a visible client exists', async () => {
         const { channel, push, sse, visibility } = createChannel()
         visibility.visible = true
         sse.delivered = 1
@@ -86,7 +86,8 @@ describe('PushNotificationChannel', () => {
 
         expect(sse.toasts).toHaveLength(1)
         expect(sse.toasts[0]?.event.data.title).toBe('Ready for input')
-        expect(push.sent).toHaveLength(0)
+        expect(push.sent).toHaveLength(1)
+        expect(push.sent[0]?.payload.data?.type).toBe('ready')
     })
 
     it('falls back to Web Push when there is no visible delivered toast', async () => {

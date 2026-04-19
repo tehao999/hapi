@@ -30,6 +30,7 @@ export type SessionMetadataSummary = {
     title?: string
     os?: string
     summary?: { text: string; updatedAt: number }
+    mirrorSource?: string
     machineId?: string
     tools?: string[]
     flavor?: string | null

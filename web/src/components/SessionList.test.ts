@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
+import { CODEX_DESKTOP_SYNC_SOURCE, getSessionDisplayTitle, toSessionSummary } from '@hapi/protocol'
 import { deduplicateSessionsByAgentId } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -79,5 +80,65 @@ describe('deduplicateSessionsByAgentId', () => {
         const result = deduplicateSessionsByAgentId(sessions)
         expect(result).toHaveLength(2)
         expect(result.map(s => s.id).sort()).toEqual(['b', 'd'])
+    })
+})
+
+describe('session summary titles', () => {
+    it('preserves desktop mirror source so summaries do not rename mirrored sessions', () => {
+        const summary = toSessionSummary({
+            id: 'session-1',
+            namespace: 'default',
+            seq: 1,
+            createdAt: 0,
+            updatedAt: 0,
+            active: false,
+            activeAt: 0,
+            metadata: {
+                path: '/Users/tehao/Documents/Playground',
+                host: 'mac',
+                mirrorSource: CODEX_DESKTOP_SYNC_SOURCE,
+                summary: { text: 'Changing task title', updatedAt: 1 }
+            },
+            metadataVersion: 1,
+            agentState: null,
+            agentStateVersion: 0,
+            thinking: false,
+            thinkingAt: 0,
+            model: null,
+            modelReasoningEffort: null,
+            effort: null
+        })
+
+        expect(summary.metadata?.mirrorSource).toBe(CODEX_DESKTOP_SYNC_SOURCE)
+        expect(getSessionDisplayTitle(summary)).toBe('Playground')
+    })
+
+    it('does not fall back to changing summaries for Codex session-list items', () => {
+        const summary = toSessionSummary({
+            id: 'session-1',
+            namespace: 'default',
+            seq: 1,
+            createdAt: 0,
+            updatedAt: 0,
+            active: false,
+            activeAt: 0,
+            metadata: {
+                path: '/Users/tehao/Documents/Playground',
+                host: 'mac',
+                flavor: 'codex',
+                codexSessionId: 'codex-thread-1',
+                summary: { text: 'Changing HAPI task title', updatedAt: 1 }
+            },
+            metadataVersion: 1,
+            agentState: null,
+            agentStateVersion: 0,
+            thinking: false,
+            thinkingAt: 0,
+            model: null,
+            modelReasoningEffort: null,
+            effort: null
+        })
+
+        expect(getSessionDisplayTitle(summary)).toBe('Playground')
     })
 })

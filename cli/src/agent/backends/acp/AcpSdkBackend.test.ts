@@ -100,6 +100,10 @@ describe('AcpSdkBackend', () => {
 
                 await sleep(5);
 
+                // Schedule the trailing updates before returning, but let them
+                // run on the next macrotask. That keeps the test focused on the
+                // post-response drain behavior without relying on very tight
+                // millisecond timers that can lose races under full-suite load.
                 setTimeout(() => {
                     backendInternal.handleSessionUpdate({
                         sessionId: 'session-1',
@@ -111,7 +115,7 @@ describe('AcpSdkBackend', () => {
                             status: 'in_progress'
                         }
                     });
-                }, 3);
+                }, 0);
 
                 setTimeout(() => {
                     backendInternal.handleSessionUpdate({
@@ -123,7 +127,7 @@ describe('AcpSdkBackend', () => {
                             rawOutput: { ok: true }
                         }
                     });
-                }, 6);
+                }, 0);
 
                 return { stopReason: 'end_turn' };
             },

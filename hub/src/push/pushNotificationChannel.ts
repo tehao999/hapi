@@ -99,9 +99,6 @@ export class PushNotificationChannel implements NotificationChannel {
                     url
                 }
             })
-            if (delivered > 0) {
-                return
-            }
         }
 
         await this.pushService.sendToNamespace(session.namespace, payload)

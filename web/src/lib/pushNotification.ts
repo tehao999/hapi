@@ -17,6 +17,15 @@ export type PushNotificationOptions = NotificationOptions & {
     renotify?: boolean
 }
 
+export type PushWindowClientLike = {
+    visibilityState?: string
+    focused?: boolean
+}
+
+export type PushClientsLike = {
+    matchAll: (options: { type: 'window'; includeUncontrolled: boolean }) => Promise<readonly PushWindowClientLike[]>
+}
+
 export function buildNotificationOptions(payload: PushPayload): PushNotificationOptions {
     const icon = payload.icon ?? '/pwa-192x192.png'
     const badge = payload.badge ?? '/pwa-64x64.png'
@@ -30,5 +39,20 @@ export function buildNotificationOptions(payload: PushPayload): PushNotification
         data,
         tag,
         renotify: Boolean(tag)
+    }
+}
+
+export async function shouldShowPushNotification(clientsApi: PushClientsLike): Promise<boolean> {
+    try {
+        const windowClients = await clientsApi.matchAll({
+            type: 'window',
+            includeUncontrolled: true
+        })
+
+        return !windowClients.some((client) => (
+            client.visibilityState === 'visible' || client.focused === true
+        ))
+    } catch {
+        return true
     }
 }

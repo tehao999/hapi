@@ -6,7 +6,8 @@ const harness = vi.hoisted(() => ({
     notifications: [] as Array<{ method: string; params: unknown }>,
     registerRequestCalls: [] as string[],
     initializeCalls: [] as unknown[],
-    turnCompletion: { status: 'Completed' } as { status: string; message?: string }
+    turnCompletion: { status: 'Completed' } as { status: string; message?: string },
+    titleSyncCalls: [] as string[]
 }));
 
 vi.mock('./codexAppServerClient', () => {
@@ -65,6 +66,13 @@ vi.mock('./utils/buildHapiMcpBridge', () => ({
         },
         mcpServers: {}
     })
+}));
+
+vi.mock('./utils/codexThreadTitle', () => ({
+    syncCodexThreadTitleToMetadata: async (_client: unknown, threadId: string) => {
+        harness.titleSyncCalls.push(threadId);
+        return true;
+    }
 }));
 
 import { codexRemoteLauncher } from './codexRemoteLauncher';
@@ -173,6 +181,7 @@ describe('codexRemoteLauncher', () => {
         harness.registerRequestCalls = [];
         harness.initializeCalls = [];
         harness.turnCompletion = { status: 'Completed' };
+        harness.titleSyncCalls = [];
     });
 
     it('finishes a turn and emits ready when task lifecycle events omit turn_id', async () => {
@@ -202,6 +211,15 @@ describe('codexRemoteLauncher', () => {
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
         expect(thinkingChanges).toContain(true);
         expect(session.thinking).toBe(false);
+    });
+
+    it('syncs the Codex desktop thread title when a HAPI runner thread is known and after the turn settles', async () => {
+        const { session } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.titleSyncCalls).toContain('thread-anonymous');
+        expect(harness.titleSyncCalls.length).toBeGreaterThanOrEqual(3);
     });
 
     it('persists failed terminal events so the hub can notify for attention', async () => {

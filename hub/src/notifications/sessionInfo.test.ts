@@ -38,6 +38,24 @@ describe('getSessionName', () => {
         expect(getSessionName(session as never)).toBe('Playground')
     })
 
+    test('does not let HAPI change_title summaries rename Codex sessions while the Codex title is pending', () => {
+        const session = {
+            id: 'session-1',
+            metadata: {
+                path: '/Users/tehao/Documents/Playground',
+                host: 'mac',
+                flavor: 'codex',
+                codexSessionId: 'codex-thread-1',
+                summary: {
+                    text: 'Latest HAPI change_title summary',
+                    updatedAt: 123
+                }
+            }
+        }
+
+        expect(getSessionName(session as never)).toBe('Playground')
+    })
+
     test('keeps manual rename above imported title', () => {
         const session = {
             id: 'session-1',

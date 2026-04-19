@@ -16,6 +16,7 @@ import { AppServerEventConverter } from './utils/appServerEventConverter';
 import { registerAppServerPermissionHandlers } from './utils/appServerPermissionAdapter';
 import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerConfig';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
+import { syncCodexThreadTitleToMetadata } from './utils/codexThreadTitle';
 import {
     RemoteLauncherBase,
     type RemoteLauncherDisplayContext,
@@ -117,6 +118,13 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const appServerClient = this.appServerClient;
         const appServerEventConverter = new AppServerEventConverter();
         const shouldAutoExitAfterIdleTurn = session.startedBy === 'runner' && session.client.isDesktopMirrorSession();
+
+        const syncThreadTitle = (threadId: string | null) => {
+            if (!threadId) {
+                return;
+            }
+            void syncCodexThreadTitleToMetadata(session.client, threadId);
+        };
 
         const normalizeCommand = (value: unknown): string | undefined => {
             if (typeof value === 'string') {
@@ -254,6 +262,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 if (threadId) {
                     this.currentThreadId = threadId;
                     session.onSessionFound(threadId);
+                    syncThreadTitle(threadId);
                 }
                 return;
             }
@@ -336,6 +345,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (isTerminalEvent) {
                 turnInFlight = false;
                 allowAnonymousTerminalEvent = false;
+                syncThreadTitle(this.currentThreadId);
                 if (session.thinking) {
                     logger.debug('thinking completed');
                     session.onThinkingChange(false);
@@ -672,6 +682,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
                     this.currentThreadId = threadId;
                     session.onSessionFound(threadId);
+                    syncThreadTitle(threadId);
                     hasThread = true;
                 } else {
                     if (!this.currentThreadId) {
@@ -697,6 +708,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 const turnResponse = await appServerClient.startTurn(turnParams, {
                     signal: this.abortController.signal
                 });
+                syncThreadTitle(this.currentThreadId);
                 const turnRecord = asRecord(turnResponse);
                 const turn = turnRecord ? asRecord(turnRecord.turn) : null;
                 const turnId = asString(turn?.id);

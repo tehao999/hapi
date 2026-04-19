@@ -6,6 +6,7 @@ export type SessionSummaryMetadata = {
     path: string
     machineId?: string
     summary?: { text: string }
+    mirrorSource?: string
     flavor?: string | null
     worktree?: WorktreeMetadata
     agentSessionId?: string
@@ -34,6 +35,7 @@ export function toSessionSummary(session: Session, options?: { unreadCount?: num
         path: session.metadata.path,
         machineId: session.metadata.machineId ?? undefined,
         summary: session.metadata.summary ? { text: session.metadata.summary.text } : undefined,
+        mirrorSource: session.metadata.mirrorSource,
         flavor: session.metadata.flavor ?? null,
         worktree: session.metadata.worktree,
         agentSessionId: session.metadata.codexSessionId
