@@ -51,22 +51,22 @@ function splitTaskChildren(block: ToolCallBlock): { pending: ChatBlock[]; rest: 
 }
 
 const TOOL_GROUP_LABELS: Record<string, string> = {
-    Bash: 'Terminal',
-    CodexBash: 'Terminal',
-    shell_command: 'Terminal',
-    CodexDiff: 'Diff',
-    CodexPatch: 'Apply changes',
-    Read: 'Read',
-    Edit: 'Edit',
-    MultiEdit: 'Edit',
-    Write: 'Write',
-    Grep: 'Search',
-    Glob: 'Search',
-    LS: 'List files',
-    TodoWrite: 'Todo list',
-    update_plan: 'Plan',
-    Task: 'Task',
-    Agent: 'Agent'
+    Bash: '终端',
+    CodexBash: '终端',
+    shell_command: '终端',
+    CodexDiff: '差异',
+    CodexPatch: '应用修改',
+    Read: '读取',
+    Edit: '编辑',
+    MultiEdit: '编辑',
+    Write: '写入',
+    Grep: '搜索',
+    Glob: '搜索',
+    LS: '列文件',
+    TodoWrite: '待办',
+    update_plan: '计划',
+    Task: '任务',
+    Agent: '代理'
 }
 
 function getToolGroupLabel(toolName: string): string {
@@ -85,7 +85,7 @@ function formatToolGroupComposition(tools: ToolCallBlock[]): string {
     const visible = entries.slice(0, 3).map(([label, count]) => count > 1 ? `${label} ×${count}` : label)
     const remaining = entries.length - visible.length
     if (remaining > 0) {
-        visible.push(`+${remaining} types`)
+        visible.push(`+${remaining} 类`)
     }
     return visible.join(' · ')
 }
@@ -93,10 +93,10 @@ function formatToolGroupComposition(tools: ToolCallBlock[]): string {
 function getToolGroupStatus(tools: ToolCallBlock[]): { text: string; icon: string; className: string } {
     const running = tools.filter((tool) => tool.tool.state === 'running').length
     if (running > 0) {
-        return { text: `${running} running`, icon: '●', className: 'text-amber-600' }
+        return { text: `${running} 个运行中`, icon: '●', className: 'text-amber-600' }
     }
 
-    return { text: 'Done', icon: '✓', className: 'text-emerald-600' }
+    return { text: '已完成', icon: '✓', className: 'text-emerald-600' }
 }
 
 function ToolGroupCard(props: { group: ToolGroupBlock }) {
@@ -114,7 +114,7 @@ function ToolGroupCard(props: { group: ToolGroupBlock }) {
                         ▸
                     </span>
                     <span className="shrink-0 font-medium text-[var(--app-fg)]">
-                        {props.group.tools.length} tool calls
+                        {props.group.tools.length} 个工具调用
                     </span>
                     <span className="shrink-0 text-[var(--app-hint)]" aria-hidden="true">·</span>
                     <span className="min-w-0 truncate font-mono text-[11px] text-[var(--app-hint)] opacity-80">

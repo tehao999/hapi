@@ -34,38 +34,34 @@ function makeText(id: string): AgentTextBlock {
 }
 
 describe('groupConsecutiveToolBlocks', () => {
-    it('groups three or more consecutive non-actionable tool calls', () => {
+    it('groups two or more consecutive non-actionable tool calls', () => {
         const grouped = groupConsecutiveToolBlocks([
             makeTool('tool-1'),
-            makeTool('tool-2'),
-            makeTool('tool-3')
+            makeTool('tool-2')
         ])
 
         expect(grouped).toHaveLength(1)
         expect(isToolGroupBlock(grouped[0])).toBe(true)
         if (!isToolGroupBlock(grouped[0])) return
         expect(grouped[0].id).toBe('tool-group:tool-1')
-        expect(grouped[0].tools.map((tool) => tool.id)).toEqual(['tool-1', 'tool-2', 'tool-3'])
+        expect(grouped[0].tools.map((tool) => tool.id)).toEqual(['tool-1', 'tool-2'])
     })
 
-    it('leaves one or two consecutive tool calls as standalone rows', () => {
+    it('leaves a single tool call as a standalone row', () => {
         const grouped = groupConsecutiveToolBlocks([
-            makeTool('tool-1'),
-            makeTool('tool-2')
+            makeTool('tool-1')
         ])
 
-        expect(grouped.map((block) => block.kind)).toEqual(['tool-call', 'tool-call'])
+        expect(grouped.map((block) => block.kind)).toEqual(['tool-call'])
     })
 
     it('uses text and other non-tool blocks as hard group boundaries', () => {
         const grouped = groupConsecutiveToolBlocks([
             makeTool('tool-1'),
             makeTool('tool-2'),
-            makeTool('tool-3'),
             makeText('text-1'),
             makeTool('tool-4'),
-            makeTool('tool-5'),
-            makeTool('tool-6')
+            makeTool('tool-5')
         ])
 
         expect(grouped.map((block) => block.kind)).toEqual(['tool-group', 'agent-text', 'tool-group'])
@@ -95,15 +91,13 @@ describe('groupConsecutiveToolBlocks', () => {
         expect(grouped.map((block) => block.kind)).toEqual([
             'tool-group',
             'tool-call',
+            'tool-group',
             'tool-call',
-            'tool-call',
-            'tool-call',
-            'tool-call',
-            'tool-call',
+            'tool-group',
             'tool-call'
         ])
         expect(grouped[1]).toBe(pending)
-        expect(grouped[4]).toBe(failed)
-        expect(grouped[7]).toBe(nested)
+        expect(grouped[3]).toBe(failed)
+        expect(grouped[5]).toBe(nested)
     })
 })

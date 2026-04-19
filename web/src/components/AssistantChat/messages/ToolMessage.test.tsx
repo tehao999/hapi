@@ -81,8 +81,7 @@ describe('HappyToolMessage tool groups', () => {
     it('renders consecutive tool groups as a compact collapsed summary', () => {
         const grouped = groupConsecutiveToolBlocks([
             makeTool('tool-1'),
-            makeTool('tool-2'),
-            makeTool('tool-3')
+            makeTool('tool-2')
         ])
         const group = grouped[0]
         expect(isToolGroupBlock(group)).toBe(true)
@@ -92,8 +91,8 @@ describe('HappyToolMessage tool groups', () => {
 
         const details = screen.getByTestId('tool-group') as HTMLDetailsElement
         expect(details.open).toBe(false)
-        expect(screen.getByText('3 tool calls')).toBeInTheDocument()
-        expect(screen.getByText('Terminal ×3')).toBeInTheDocument()
-        expect(screen.getByText('Done')).toBeInTheDocument()
+        expect(screen.getByText('2 个工具调用')).toBeInTheDocument()
+        expect(screen.getByText('终端 ×2')).toBeInTheDocument()
+        expect(screen.getByText('已完成')).toBeInTheDocument()
     })
 })

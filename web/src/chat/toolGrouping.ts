@@ -1,6 +1,6 @@
 import type { ChatBlock, ToolCallBlock } from '@/chat/types'
 
-export const TOOL_GROUP_MIN_SIZE = 3
+export const TOOL_GROUP_MIN_SIZE = 2
 
 export type ToolGroupBlock = {
     kind: 'tool-group'
