@@ -3,12 +3,13 @@ import type { AppendMessage, AttachmentAdapter, ThreadMessageLike } from '@assis
 import { useExternalMessageConverter, useExternalStoreRuntime } from '@assistant-ui/react'
 import { safeStringify } from '@hapi/protocol'
 import { renderEventLabel } from '@/chat/presentation'
+import { groupConsecutiveToolBlocks, isToolGroupBlock, type ToolDisplayBlock } from '@/chat/toolGrouping'
 import type { ChatBlock, CliOutputBlock } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
 
 export type HappyChatMessageMetadata = {
-    kind: 'user' | 'assistant' | 'tool' | 'event' | 'cli-output'
+    kind: 'user' | 'assistant' | 'tool' | 'tool-group' | 'event' | 'cli-output'
     status?: HappyMessageStatus
     localId?: string | null
     originalText?: string
@@ -18,7 +19,7 @@ export type HappyChatMessageMetadata = {
     attachments?: AttachmentMetadata[]
 }
 
-function toThreadMessageLike(block: ChatBlock): ThreadMessageLike {
+function toThreadMessageLike(block: ToolDisplayBlock): ThreadMessageLike {
     if (block.kind === 'user-text') {
         const messageId = `user:${block.id}`
         return {
@@ -86,6 +87,28 @@ function toThreadMessageLike(block: ChatBlock): ThreadMessageLike {
             content: [{ type: 'text', text: block.text }],
             metadata: {
                 custom: { kind: 'cli-output', source: block.source } satisfies HappyChatMessageMetadata
+            }
+        }
+    }
+
+    if (isToolGroupBlock(block)) {
+        const messageId = block.id
+
+        return {
+            role: 'assistant',
+            id: messageId,
+            createdAt: new Date(block.createdAt),
+            content: [{
+                type: 'tool-call',
+                toolCallId: block.id,
+                toolName: 'tool-group',
+                argsText: '',
+                result: undefined,
+                isError: false,
+                artifact: block
+            }],
+            metadata: {
+                custom: { kind: 'tool-group', toolCallId: block.id } satisfies HappyChatMessageMetadata
             }
         }
     }
@@ -177,11 +200,16 @@ export function useHappyRuntime(props: {
     attachmentAdapter?: AttachmentAdapter
     allowSendWhenInactive?: boolean
 }) {
+    const displayBlocks = useMemo(
+        () => groupConsecutiveToolBlocks(props.blocks),
+        [props.blocks]
+    )
+
     // Use cached message converter for performance optimization
     // This prevents re-converting all messages on every render
-    const convertedMessages = useExternalMessageConverter<ChatBlock>({
+    const convertedMessages = useExternalMessageConverter<ToolDisplayBlock>({
         callback: toThreadMessageLike,
-        messages: props.blocks as ChatBlock[],
+        messages: displayBlocks,
         isRunning: props.session.thinking,
     })
 
