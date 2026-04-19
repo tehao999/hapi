@@ -69,6 +69,7 @@ vi.mock('./utils/buildHapiMcpBridge', () => ({
 }));
 
 vi.mock('./utils/codexThreadTitle', () => ({
+    createCodexThreadTitlePoller: () => ({ stop: () => {} }),
     syncCodexThreadTitleToMetadata: async (_client: unknown, threadId: string) => {
         harness.titleSyncCalls.push(threadId);
         return true;

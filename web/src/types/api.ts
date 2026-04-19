@@ -28,6 +28,7 @@ export type SessionMetadataSummary = {
     version?: string
     name?: string
     title?: string
+    titleUpdatedAt?: number
     os?: string
     summary?: { text: string; updatedAt: number }
     mirrorSource?: string

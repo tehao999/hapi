@@ -1,6 +1,6 @@
 const path = require('node:path');
 const { importRolloutFile } = require('./importer');
-const { getCodexThread } = require('./codex-db');
+const { getCodexThread, updateCodexThreadTitle } = require('./codex-db');
 const { findHapiSessionByCodexId, updateSessionMetadata } = require('./hapi-db');
 const { createCliMessageSink } = require('./socket-sink');
 const { readCliApiToken } = require('./hapi-settings');
@@ -69,21 +69,67 @@ function normalizeCodexThreadTitle(title) {
 }
 
 function applyCodexThreadTitle(metadata, title) {
+  return applyCodexThreadTitleWithTimestamp(metadata, title, undefined);
+}
+
+function applyCodexThreadTitleWithTimestamp(metadata, title, titleUpdatedAt) {
   const normalized = normalizeCodexThreadTitle(title);
   if (!normalized) return { changed: false, metadata };
   const current = metadata && typeof metadata === 'object' ? metadata : {};
-  if (current.title === normalized) return { changed: false, metadata: current };
+  const nextTitleUpdatedAt = Number.isFinite(Number(titleUpdatedAt)) ? Number(titleUpdatedAt) : current.titleUpdatedAt;
+  const shouldClearName = current.name !== undefined;
+  if (
+    current.title === normalized
+    && !shouldClearName
+    && current.titleUpdatedAt === nextTitleUpdatedAt
+  ) {
+    return { changed: false, metadata: current };
+  }
   return {
     changed: true,
     metadata: {
       ...current,
-      title: normalized
+      name: undefined,
+      title: normalized,
+      ...(Number.isFinite(Number(titleUpdatedAt)) ? { titleUpdatedAt: Number(titleUpdatedAt) } : {})
     }
   };
 }
 
-async function syncCodexThreadTitle({ hapiDb, session, thread, sink, updateMetadataFn = updateSessionMetadata }) {
-  const titleUpdate = applyCodexThreadTitle(session?.metadata, thread?.title);
+function getHapiMetadataTitle(metadata) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  return normalizeCodexThreadTitle(metadata.title ?? metadata.name);
+}
+
+function getMetadataTitleUpdatedAt(metadata) {
+  const value = Number(metadata?.titleUpdatedAt);
+  return Number.isFinite(value) ? value : 0;
+}
+
+async function syncCodexThreadTitle({
+  hapiDb,
+  codexDb,
+  session,
+  thread,
+  sink,
+  updateMetadataFn = updateSessionMetadata,
+  writeThreadTitleFn = updateCodexThreadTitle
+}) {
+  const codexTitle = normalizeCodexThreadTitle(thread?.title);
+  const hapiTitle = getHapiMetadataTitle(session?.metadata);
+  const codexUpdatedAt = Number(thread?.updatedAtMs || 0);
+  const hapiUpdatedAt = getMetadataTitleUpdatedAt(session?.metadata);
+
+  if (codexTitle && hapiTitle && codexTitle !== hapiTitle && hapiUpdatedAt > codexUpdatedAt) {
+    const result = writeThreadTitleFn(codexDb, thread.id, hapiTitle);
+    return {
+      changed: Boolean(result?.changed),
+      direction: 'hapi-to-codex',
+      result
+    };
+  }
+
+  const titleUpdate = applyCodexThreadTitleWithTimestamp(session?.metadata, thread?.title, thread?.updatedAtMs);
   if (!titleUpdate.changed) return { changed: false };
 
   const expectedVersion = Number(session?.metadata_version || session?.metadataVersion || 0);
@@ -99,6 +145,7 @@ async function syncCodexThreadTitle({ hapiDb, session, thread, sink, updateMetad
     });
     return {
       changed: ack?.result === 'success',
+      direction: 'codex-to-hapi',
       result: ack?.result,
       version: ack?.version,
       metadata: ack?.metadata
@@ -108,6 +155,7 @@ async function syncCodexThreadTitle({ hapiDb, session, thread, sink, updateMetad
   const result = updateMetadataFn(hapiDb, session.id, titleUpdate.metadata, expectedVersion);
   return {
     changed: result?.result === 'success',
+    direction: 'codex-to-hapi',
     result: result?.result,
     version: result?.version,
     metadata: result?.metadata
@@ -161,6 +209,7 @@ async function runWatchIteration(opts, state = {}, deps = {}) {
   const importWithSink = deps.importWithSink ?? importRolloutFile.withSink;
   const importDirect = deps.importDirect ?? importRolloutFile;
   const updateMetadataFn = deps.updateMetadata ?? updateSessionMetadata;
+  const writeThreadTitleFn = deps.writeThreadTitle ?? updateCodexThreadTitle;
 
   let currentBinding = state.currentBinding ?? null;
   let currentSink = state.currentSink ?? null;
@@ -191,10 +240,12 @@ async function runWatchIteration(opts, state = {}, deps = {}) {
   const titleSync = thread
     ? await syncCodexThreadTitle({
         hapiDb: opts.hapiDb,
+        codexDb: opts.codexDb,
         session,
         thread,
         sink: currentSink,
-        updateMetadataFn
+        updateMetadataFn,
+        writeThreadTitleFn
       })
     : { changed: false };
 

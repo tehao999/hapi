@@ -16,6 +16,44 @@ function createPublisher(events: SyncEvent[]): EventPublisher {
 }
 
 describe('session model', () => {
+    it('renames Codex-backed sessions through the synced title field instead of a HAPI-only name', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const engine = new SyncEngine(
+            store,
+            null as never,
+            new RpcRegistry(),
+            { broadcast: () => undefined } as never
+        )
+        ;(engine as unknown as { eventPublisher: EventPublisher }).eventPublisher = createPublisher(events)
+
+        const session = engine.getOrCreateSession(
+            'codex-session',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                codexSessionId: 'thread-1',
+                name: 'Old HAPI Name',
+                title: 'Old Codex Title'
+            },
+            null,
+            'default',
+            'gpt-5.4'
+        )
+
+        try {
+            await engine.renameSession(session.id, 'New Shared Title')
+            const updated = engine.getSession(session.id)
+
+            expect(updated?.metadata?.title).toBe('New Shared Title')
+            expect(updated?.metadata?.name).toBeUndefined()
+            expect(typeof updated?.metadata?.titleUpdatedAt).toBe('number')
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('includes explicit model in session summaries', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

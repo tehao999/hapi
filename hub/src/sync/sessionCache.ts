@@ -1,3 +1,4 @@
+import { CODEX_DESKTOP_SYNC_SOURCE } from '@hapi/protocol'
 import { AgentStateSchema, MetadataSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, PermissionMode, Session } from '@hapi/protocol/types'
 import type { Store } from '../store'
@@ -6,6 +7,12 @@ import { EventPublisher } from './eventPublisher'
 import { mergeSessionMetadata } from './sessionMetadata'
 import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
 import { extractBackgroundTaskDelta } from './backgroundTasks'
+
+function isCodexBackedMetadata(metadata: Record<string, unknown>): boolean {
+    return metadata.mirrorSource === CODEX_DESKTOP_SYNC_SOURCE
+        || metadata.flavor === 'codex'
+        || typeof metadata.codexSessionId === 'string'
+}
 
 export class SessionCache {
     private readonly sessions: Map<string, Session> = new Map()
@@ -363,7 +370,14 @@ export class SessionCache {
         }
 
         const currentMetadata = session.metadata ?? { path: '', host: '' }
-        const newMetadata = { ...currentMetadata, name }
+        const newMetadata: Record<string, unknown> = isCodexBackedMetadata(currentMetadata as Record<string, unknown>)
+            ? {
+                ...currentMetadata,
+                name: undefined,
+                title: name,
+                titleUpdatedAt: Date.now()
+            }
+            : { ...currentMetadata, name }
 
         const result = this.store.sessions.updateSessionMetadata(
             sessionId,

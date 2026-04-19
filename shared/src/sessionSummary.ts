@@ -3,6 +3,7 @@ import type { Session, WorktreeMetadata } from './schemas'
 export type SessionSummaryMetadata = {
     name?: string
     title?: string
+    titleUpdatedAt?: number
     path: string
     machineId?: string
     summary?: { text: string }
@@ -32,6 +33,7 @@ export function toSessionSummary(session: Session, options?: { unreadCount?: num
     const metadata: SessionSummaryMetadata | null = session.metadata ? {
         name: session.metadata.name,
         title: session.metadata.title,
+        titleUpdatedAt: session.metadata.titleUpdatedAt,
         path: session.metadata.path,
         machineId: session.metadata.machineId ?? undefined,
         summary: session.metadata.summary ? { text: session.metadata.summary.text } : undefined,

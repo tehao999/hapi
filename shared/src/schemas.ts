@@ -37,6 +37,7 @@ export const MetadataSchema = z.object({
     version: z.string().optional(),
     name: z.string().optional(),
     title: z.string().optional(),
+    titleUpdatedAt: z.number().optional(),
     os: z.string().optional(),
     summary: MetadataSummarySchema.optional(),
     machineId: z.string().optional(),

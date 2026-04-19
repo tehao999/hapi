@@ -188,6 +188,85 @@ test('watch iteration pushes Codex thread title into HAPI metadata over the live
   assert.equal(metadataUpdates[0].sid, 'session-1');
   assert.equal(metadataUpdates[0].expectedVersion, 4);
   assert.equal(metadataUpdates[0].metadata.title, 'Codex Desktop Thread Title');
-  assert.equal(metadataUpdates[0].metadata.name, 'Manual HAPI Name');
+  assert.equal(metadataUpdates[0].metadata.name, undefined);
+  assert.equal(metadataUpdates[0].metadata.titleUpdatedAt, 1234);
   assert.deepEqual(metadataUpdates[0].metadata.summary, { text: 'Changing summary', updatedAt: 99 });
+});
+
+test('watch iteration writes a newer HAPI title back to the Codex thread instead of overwriting it', async () => {
+  const metadataUpdates = [];
+  const codexTitleWrites = [];
+  const opts = {
+    threadId: 'abc',
+    codexDb: '/tmp/codex.db',
+    hapiDb: '/tmp/hapi.db',
+    hapiSettings: '/tmp/settings.json',
+    hubUrl: 'http://127.0.0.1:3006',
+    namespace: 'default',
+    delivery: 'socket',
+    mode: 'all',
+    fromLine: 1
+  };
+
+  const deps = {
+    getThread() {
+      return {
+        id: 'abc',
+        rolloutPath: '/tmp/rollout.jsonl',
+        title: 'Old Codex Title',
+        cwd: '/tmp/project',
+        updatedAtMs: 100
+      };
+    },
+    findSession() {
+      return {
+        id: 'session-1',
+        metadata_version: 4,
+        metadata: {
+          path: '/tmp/project',
+          host: 'mac',
+          title: 'New HAPI Title',
+          titleUpdatedAt: 200,
+          mirrorSource: 'codex-desktop-sync',
+          executionControl: { generation: 3 }
+        }
+      };
+    },
+    readToken() {
+      return 'secret:default';
+    },
+    createSink() {
+      return {
+        async open() {},
+        async close() {},
+        async updateMetadata(payload) {
+          metadataUpdates.push(payload);
+          return { result: 'success', version: 5, metadata: payload.metadata };
+        }
+      };
+    },
+    writeThreadTitle(dbPath, threadId, title) {
+      codexTitleWrites.push({ dbPath, threadId, title });
+      return { changed: true };
+    },
+    async importWithSink() {
+      return {
+        read: 0,
+        converted: 0,
+        inserted: 0,
+        skipped: 0,
+        missingSession: false,
+        nextFromLine: 1
+      };
+    }
+  };
+
+  const iteration = await runWatchIteration({ ...opts }, { currentBinding: null, currentSink: null }, deps);
+
+  assert.deepEqual(codexTitleWrites, [
+    { dbPath: '/tmp/codex.db', threadId: 'abc', title: 'New HAPI Title' }
+  ]);
+  assert.deepEqual(metadataUpdates, []);
+  assert.equal(iteration.titleSync.direction, 'hapi-to-codex');
+  assert.equal(iteration.titleSync.changed, true);
 });

@@ -9,6 +9,7 @@ import { apiValidationError } from '@/utils/errorUtils'
 import { AsyncLock } from '@/utils/lock'
 import type { RawJSONLines } from '@/claude/types'
 import { configuration } from '@/configuration'
+import { getHapiMetadataTitleForCodex, syncHapiMetadataTitleToCodexThread } from '@/codex/utils/codexThreadTitle'
 import { AGENT_MESSAGE_PAYLOAD_TYPE, isCodexDesktopMirrorSession } from "@hapi/protocol"
 import type { ClientToServerEvents, ServerToClientEvents, Update } from '@hapi/protocol'
 import {
@@ -215,7 +216,9 @@ export class ApiSessionClient extends EventEmitter {
                     if (data.body.metadata && data.body.metadata.version > this.metadataVersion) {
                         const parsed = MetadataSchema.safeParse(data.body.metadata.value)
                         if (parsed.success) {
+                            const previousMetadata = this.metadata
                             this.metadata = parsed.data
+                            this.syncCodexThreadTitleForMetadataChange(previousMetadata, this.metadata)
                         } else {
                             logger.debug('[API] Ignoring invalid metadata update', { version: data.body.metadata.version })
                         }
@@ -514,6 +517,23 @@ export class ApiSessionClient extends EventEmitter {
         })
     }
 
+    getMetadataSnapshot(): Metadata | null {
+        return this.metadata ? { ...this.metadata } : null
+    }
+
+    private syncCodexThreadTitleForMetadataChange(previous: Metadata | null, next: Metadata | null): void {
+        const nextTitle = getHapiMetadataTitleForCodex(next)
+        if (!next?.codexSessionId || !nextTitle) {
+            return
+        }
+
+        if (getHapiMetadataTitleForCodex(previous) === nextTitle) {
+            return
+        }
+
+        void syncHapiMetadataTitleToCodexThread(next)
+    }
+
     updateMetadata(handler: (metadata: Metadata) => Metadata): void {
         this.metadataLock.inLock(async () => {
             await backoff(async () => {
@@ -533,7 +553,9 @@ export class ApiSessionClient extends EventEmitter {
                         return parsed.success ? parsed.data : null
                     },
                     applyValue: (value) => {
+                        const previousMetadata = this.metadata
                         this.metadata = value
+                        this.syncCodexThreadTitleForMetadataChange(previousMetadata, this.metadata)
                     },
                     applyVersion: (version) => {
                         this.metadataVersion = version

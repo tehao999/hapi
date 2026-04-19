@@ -73,4 +73,20 @@ describe('getSessionName', () => {
 
         expect(getSessionName(session as never)).toBe('Manual HAPI Name')
     })
+
+    test('uses the synced Codex title above a stale HAPI name for Codex-backed sessions', () => {
+        const session = {
+            id: 'session-1',
+            metadata: {
+                path: '/Users/tehao/Documents/Playground',
+                host: 'mac',
+                flavor: 'codex',
+                codexSessionId: 'codex-thread-1',
+                name: 'Old HAPI Name',
+                title: 'Latest Codex Title'
+            }
+        }
+
+        expect(getSessionName(session as never)).toBe('Latest Codex Title')
+    })
 })

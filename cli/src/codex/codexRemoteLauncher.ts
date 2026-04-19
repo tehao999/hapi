@@ -16,7 +16,7 @@ import { AppServerEventConverter } from './utils/appServerEventConverter';
 import { registerAppServerPermissionHandlers } from './utils/appServerPermissionAdapter';
 import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerConfig';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
-import { syncCodexThreadTitleToMetadata } from './utils/codexThreadTitle';
+import { createCodexThreadTitlePoller, syncCodexThreadTitleToMetadata } from './utils/codexThreadTitle';
 import {
     RemoteLauncherBase,
     type RemoteLauncherDisplayContext,
@@ -36,6 +36,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
     private abortController: AbortController = new AbortController();
     private currentThreadId: string | null = null;
     private currentTurnId: string | null = null;
+    private titlePoller: { stop: () => void } | null = null;
 
     constructor(session: CodexSession) {
         super(process.env.DEBUG ? session.logPath : undefined);
@@ -125,6 +126,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
             void syncCodexThreadTitleToMetadata(session.client, threadId);
         };
+        this.titlePoller ??= createCodexThreadTitlePoller({
+            client: session.client,
+            getThreadId: () => this.currentThreadId
+        });
 
         const normalizeCommand = (value: unknown): string | undefined => {
             if (typeof value === 'string') {
@@ -778,6 +783,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             this.happyServer.stop();
             this.happyServer = null;
         }
+
+        this.titlePoller?.stop();
+        this.titlePoller = null;
 
         this.permissionHandler?.reset();
         this.reasoningProcessor?.abort();

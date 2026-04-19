@@ -11,6 +11,7 @@ import { z } from "zod";
 import { logger } from "@/ui/logger";
 import { ApiSessionClient } from "@/api/apiSession";
 import { randomUUID } from "node:crypto";
+import { applyHapiTitleToMetadata, syncHapiMetadataTitleToCodexThread } from "@/codex/utils/codexThreadTitle";
 
 export async function startHappyServer(client: ApiSessionClient) {
     // Handler that sends title updates via the client
@@ -23,6 +24,9 @@ export async function startHappyServer(client: ApiSessionClient) {
                 summary: title,
                 leafUuid: randomUUID()
             });
+            const metadata = client.getMetadataSnapshot();
+            client.updateMetadata((currentMetadata) => applyHapiTitleToMetadata(currentMetadata, title));
+            void syncHapiMetadataTitleToCodexThread(metadata ? applyHapiTitleToMetadata(metadata, title) : null);
             
             return { success: true };
         } catch (error) {

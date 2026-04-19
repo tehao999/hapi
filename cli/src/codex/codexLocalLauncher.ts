@@ -7,7 +7,7 @@ import { convertCodexEvent } from './utils/codexEventConverter';
 import { buildHapiMcpBridge } from './utils/buildHapiMcpBridge';
 import { stripCodexCliOverrides } from './utils/codexCliOverrides';
 import { buildCodexPermissionModeCliArgs } from './utils/permissionModeConfig';
-import { syncCodexThreadTitleToMetadata } from './utils/codexThreadTitle';
+import { createCodexThreadTitlePoller, syncCodexThreadTitleToMetadata } from './utils/codexThreadTitle';
 import { BaseLocalLauncher } from '@/modules/common/launcher/BaseLocalLauncher';
 
 export async function codexLocalLauncher(session: CodexSession): Promise<'switch' | 'exit'> {
@@ -23,16 +23,23 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
             ...stripCodexCliOverrides(session.codexArgs)
         ]
         : session.codexArgs;
+    let currentCodexThreadId: string | null = resumeSessionId;
 
     // Start hapi hub for MCP bridge (same as remote mode)
     const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
     logger.debug(`[codex-local]: Started hapi MCP bridge server at ${happyServer.url}`);
 
     const handleSessionFound = (sessionId: string) => {
+        currentCodexThreadId = sessionId;
         session.onSessionFound(sessionId);
         void syncCodexThreadTitleToMetadata(session.client, sessionId);
         scanner?.onNewSession(sessionId);
     };
+
+    const titlePoller = createCodexThreadTitlePoller({
+        client: session.client,
+        getThreadId: () => currentCodexThreadId
+    });
 
     const launcher = new BaseLocalLauncher({
         label: 'codex-local',
@@ -95,6 +102,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     try {
         return await launcher.run();
     } finally {
+        titlePoller.stop();
         await scanner?.cleanup();
         happyServer.stop();
         logger.debug('[codex-local]: Stopped hapi MCP bridge server');
