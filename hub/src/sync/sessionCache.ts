@@ -3,6 +3,7 @@ import type { CodexCollaborationMode, PermissionMode, Session } from '@hapi/prot
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
+import { mergeSessionMetadata } from './sessionMetadata'
 import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
 import { extractBackgroundTaskDelta } from './backgroundTasks'
 
@@ -449,7 +450,7 @@ export class SessionCache {
 
         this.store.messages.mergeSessionMessages(oldSessionId, newSessionId)
 
-        const mergedMetadata = this.mergeSessionMetadata(oldStored.metadata, newStored.metadata)
+        const mergedMetadata = mergeSessionMetadata(oldStored.metadata, newStored.metadata)
         if (mergedMetadata !== null && mergedMetadata !== newStored.metadata) {
             for (let attempt = 0; attempt < 2; attempt += 1) {
                 const latest = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
@@ -549,60 +550,6 @@ export class SessionCache {
         this.todoBackfillAttemptedSessionIds.delete(oldSessionId)
 
         this.refreshSession(newSessionId)
-    }
-
-    private mergeSessionMetadata(oldMetadata: unknown | null, newMetadata: unknown | null): unknown | null {
-        if (!oldMetadata || typeof oldMetadata !== 'object') {
-            return newMetadata
-        }
-        if (!newMetadata || typeof newMetadata !== 'object') {
-            return oldMetadata
-        }
-
-        const oldObj = oldMetadata as Record<string, unknown>
-        const newObj = newMetadata as Record<string, unknown>
-        const merged: Record<string, unknown> = { ...newObj }
-        let changed = false
-
-        if (typeof oldObj.name === 'string' && typeof newObj.name !== 'string') {
-            merged.name = oldObj.name
-            changed = true
-        }
-
-        const oldSummary = oldObj.summary as { text?: unknown; updatedAt?: unknown } | undefined
-        const newSummary = newObj.summary as { text?: unknown; updatedAt?: unknown } | undefined
-        const oldUpdatedAt = typeof oldSummary?.updatedAt === 'number' ? oldSummary.updatedAt : null
-        const newUpdatedAt = typeof newSummary?.updatedAt === 'number' ? newSummary.updatedAt : null
-        if (oldUpdatedAt !== null && (newUpdatedAt === null || oldUpdatedAt > newUpdatedAt)) {
-            merged.summary = oldSummary
-            changed = true
-        }
-
-        if (oldObj.worktree && !newObj.worktree) {
-            merged.worktree = oldObj.worktree
-            changed = true
-        }
-
-        if (oldObj.mirrorSource === 'codex-desktop-sync' && newObj.mirrorSource !== 'codex-desktop-sync') {
-            merged.mirrorSource = oldObj.mirrorSource
-            changed = true
-        }
-
-        if (oldObj.mirrorSource === 'codex-desktop-sync' && oldObj.executionControl !== undefined && newObj.executionControl === undefined) {
-            merged.executionControl = oldObj.executionControl
-            changed = true
-        }
-
-        if (typeof oldObj.path === 'string' && typeof newObj.path !== 'string') {
-            merged.path = oldObj.path
-            changed = true
-        }
-        if (typeof oldObj.host === 'string' && typeof newObj.host !== 'string') {
-            merged.host = oldObj.host
-            changed = true
-        }
-
-        return changed ? merged : newMetadata
     }
 
     private mergeAgentState(oldState: unknown | null, newState: unknown | null): unknown | null {

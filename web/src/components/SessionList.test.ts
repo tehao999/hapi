@@ -11,6 +11,7 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         metadata: null,
         todoProgress: null,
         pendingRequestsCount: 0,
+        unreadCount: 0,
         model: null,
         effort: null,
         ...overrides

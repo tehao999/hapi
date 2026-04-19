@@ -104,18 +104,31 @@ describe('PushNotificationChannel', () => {
     it('formats attention notification payloads', async () => {
         const { channel, push } = createChannel()
 
-        await channel.sendAttention(createSession(), 'failed')
+        await channel.sendAttention(createSession(), 'failed', { unreadCount: 2, totalUnreadCount: 5 })
 
         expect(push.sent).toHaveLength(1)
         expect(push.sent[0]?.payload).toEqual({
-            title: 'Task needs attention',
+            title: 'Task needs attention · 2 unread',
             body: 'Build UI stopped or failed',
             tag: 'attention-session-1',
             data: {
                 type: 'attention',
                 sessionId: 'session-1',
-                url: '/sessions/session-1'
+                url: '/sessions/session-1',
+                unreadCount: 2,
+                totalUnreadCount: 5
             }
         })
+    })
+
+    it('includes unread count in ready notification payloads', async () => {
+        const { channel, push } = createChannel()
+
+        await channel.sendReady(createSession(), { unreadCount: 3, totalUnreadCount: 8 })
+
+        expect(push.sent).toHaveLength(1)
+        expect(push.sent[0]?.payload.title).toBe('Ready for input · 3 unread')
+        expect(push.sent[0]?.payload.data?.unreadCount).toBe(3)
+        expect(push.sent[0]?.payload.data?.totalUnreadCount).toBe(8)
     })
 })

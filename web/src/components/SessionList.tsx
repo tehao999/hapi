@@ -415,6 +415,14 @@ function SessionItem(props: {
                                 {t('session.item.pending')} {s.pendingRequestsCount}
                             </span>
                         ) : null}
+                        {s.unreadCount > 0 ? (
+                            <span
+                                className="inline-flex min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+                                aria-label={`${s.unreadCount} unread`}
+                            >
+                                {s.unreadCount > 9 ? '9+' : s.unreadCount}
+                            </span>
+                        ) : null}
                         <span className="text-[var(--app-hint)]">
                             {formatRelativeTime(s.updatedAt, t)}
                         </span>

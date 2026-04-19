@@ -10,6 +10,8 @@ export type PushPayload = {
         type: 'permission-request' | 'ready' | 'attention'
         sessionId: string
         url: string
+        unreadCount?: number
+        totalUnreadCount?: number
     }
 }
 

@@ -19,11 +19,12 @@ export type SessionSummary = {
     metadata: SessionSummaryMetadata | null
     todoProgress: { completed: number; total: number } | null
     pendingRequestsCount: number
+    unreadCount: number
     model: string | null
     effort: string | null
 }
 
-export function toSessionSummary(session: Session): SessionSummary {
+export function toSessionSummary(session: Session, options?: { unreadCount?: number }): SessionSummary {
     const pendingRequestsCount = session.agentState?.requests ? Object.keys(session.agentState.requests).length : 0
 
     const metadata: SessionSummaryMetadata | null = session.metadata ? {
@@ -55,6 +56,7 @@ export function toSessionSummary(session: Session): SessionSummary {
         metadata,
         todoProgress,
         pendingRequestsCount,
+        unreadCount: options?.unreadCount ?? 0,
         model: session.model,
         effort: session.effort
     }

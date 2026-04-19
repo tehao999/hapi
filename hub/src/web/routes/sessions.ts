@@ -61,6 +61,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const getPendingCount = (s: Session) => s.agentState?.requests ? Object.keys(s.agentState.requests).length : 0
 
         const namespace = c.get('namespace')
+        const unreadCounts = engine.getSessionUnreadCounts(namespace)
         const sessions = engine.getSessionsByNamespace(namespace)
             .sort((a, b) => {
                 // Active sessions first
@@ -76,7 +77,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 // Then by updatedAt
                 return b.updatedAt - a.updatedAt
             })
-            .map(toSessionSummary)
+            .map((session) => toSessionSummary(session, {
+                unreadCount: unreadCounts.get(session.id) ?? 0
+            }))
 
         return c.json({ sessions })
     })
@@ -93,6 +96,21 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         return c.json({ session: sessionResult.session })
+    })
+
+    app.post('/sessions/:id/read', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        engine.markSessionRead(sessionResult.sessionId, c.get('namespace'))
+        return c.json({ ok: true })
     })
 
     app.post('/sessions/:id/resume', async (c) => {

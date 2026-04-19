@@ -9,7 +9,7 @@ import { apiValidationError } from '@/utils/errorUtils'
 import { AsyncLock } from '@/utils/lock'
 import type { RawJSONLines } from '@/claude/types'
 import { configuration } from '@/configuration'
-import { AGENT_MESSAGE_PAYLOAD_TYPE } from "@hapi/protocol"
+import { AGENT_MESSAGE_PAYLOAD_TYPE, isCodexDesktopMirrorSession } from "@hapi/protocol"
 import type { ClientToServerEvents, ServerToClientEvents, Update } from '@hapi/protocol'
 import {
     TerminalClosePayloadSchema,
@@ -505,6 +505,13 @@ export class ApiSessionClient extends EventEmitter {
     sendSessionDeath(): void {
         void cleanupUploadDir(this.sessionId)
         this.socket.emit('session-end', { sid: this.sessionId, time: Date.now() })
+    }
+
+    isDesktopMirrorSession(): boolean {
+        return isCodexDesktopMirrorSession({
+            metadata: this.metadata,
+            messages: null
+        })
     }
 
     updateMetadata(handler: (metadata: Metadata) => Metadata): void {

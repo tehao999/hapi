@@ -1,5 +1,5 @@
 import { CODEX_DESKTOP_SYNC_SOURCE, getExecutionControl, isObject } from '@hapi/protocol'
-import type { ClientToServerEvents } from '@hapi/protocol'
+import type { ClientToServerEvents, SyncMessageAck } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
@@ -9,6 +9,7 @@ import { shouldAcceptPassiveSync } from '../../../sync/sessionControlService'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
+import { mergeSessionMetadata } from '../../../sync/sessionMetadata'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { AccessErrorReason, AccessResult } from './types'
 
@@ -27,6 +28,7 @@ type SessionAlivePayload = {
 type SessionEndPayload = {
     sid: string
     time: number
+    source?: 'cli' | 'codex-desktop-sync'
 }
 
 type ResolveSessionAccess = (sessionId: string) => AccessResult<StoredSession>
@@ -35,6 +37,8 @@ type EmitAccessError = (scope: 'session' | 'machine', id: string, reason: Access
 
 type UpdateMetadataHandler = ClientToServerEvents['update-metadata']
 type UpdateStateHandler = ClientToServerEvents['update-state']
+type SyncMessageAckCallback = (answer: SyncMessageAck) => void
+type SyncMessageRejectReason = Extract<SyncMessageAck, { inserted: false }>['reason']
 
 const messageSchema = z.object({
     sid: z.string(),
@@ -103,9 +107,20 @@ export type SessionHandlersDeps = {
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
     const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionEnd, onWebappEvent, onBackgroundTaskDelta } = deps
 
-    const handleMessage = (data: unknown, options: { broadcastToCli: boolean; passiveSync: boolean }) => {
+    const rejectPassiveSync = (cb: SyncMessageAckCallback | undefined, reason: SyncMessageRejectReason) => {
+        cb?.({ inserted: false, reason })
+    }
+
+    const handleMessage = (
+        data: unknown,
+        options: { broadcastToCli: boolean; passiveSync: boolean },
+        cb?: SyncMessageAckCallback
+    ) => {
         const parsed = messageSchema.safeParse(data)
         if (!parsed.success) {
+            if (options.passiveSync) {
+                rejectPassiveSync(cb, 'metadata-conflict')
+            }
             return
         }
 
@@ -116,6 +131,9 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         const sessionAccess = resolveSessionAccess(sid)
         if (!sessionAccess.ok) {
             emitAccessError('session', sid, sessionAccess.reason)
+            if (options.passiveSync) {
+                rejectPassiveSync(cb, 'metadata-conflict')
+            }
             return
         }
         const session = sessionAccess.value
@@ -124,6 +142,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             const control = getExecutionControl(session.metadata)
             const verdict = shouldAcceptPassiveSync(control, parsed.data.generation, Date.now())
             if (!verdict.accepted) {
+                rejectPassiveSync(cb, 'stale-generation')
                 return
             }
 
@@ -143,21 +162,23 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                     session.namespace,
                     { touchUpdatedAt: false }
                 )
-                if (result.result === 'success') {
-                    const update = {
-                        id: randomUUID(),
-                        seq: Date.now(),
-                        createdAt: Date.now(),
-                        body: {
-                            t: 'update-session' as const,
-                            sid,
-                            metadata: { version: result.version, value: metadata },
-                            agentState: null
-                        }
-                    }
-                    socket.to(`session:${sid}`).emit('update', update)
-                    onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { sid } })
+                if (result.result !== 'success') {
+                    rejectPassiveSync(cb, 'metadata-conflict')
+                    return
                 }
+                const update = {
+                    id: randomUUID(),
+                    seq: Date.now(),
+                    createdAt: Date.now(),
+                    body: {
+                        t: 'update-session' as const,
+                        sid,
+                        metadata: { version: result.version, value: metadata },
+                        agentState: null
+                    }
+                }
+                socket.to(`session:${sid}`).emit('update', update)
+                onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { sid } })
             }
         }
 
@@ -218,14 +239,18 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 createdAt: msg.createdAt
             }
         })
+
+        if (options.passiveSync) {
+            cb?.({ inserted: true })
+        }
     }
 
     socket.on('message', (data: unknown) => {
         handleMessage(data, { broadcastToCli: true, passiveSync: false })
     })
 
-    socket.on('sync-message', (data: unknown) => {
-        handleMessage(data, { broadcastToCli: false, passiveSync: true })
+    socket.on('sync-message', (data: unknown, cb?: SyncMessageAckCallback) => {
+        handleMessage(data, { broadcastToCli: false, passiveSync: true }, cb)
     })
 
     const handleUpdateMetadata: UpdateMetadataHandler = (data, cb) => {
@@ -242,9 +267,10 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
+        const mergedMetadata = mergeSessionMetadata(sessionAccess.value.metadata, metadata)
         const result = store.sessions.updateSessionMetadata(
             sid,
-            metadata,
+            mergedMetadata,
             expectedVersion,
             sessionAccess.value.namespace
         )
@@ -264,7 +290,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 body: {
                     t: 'update-session' as const,
                     sid,
-                    metadata: { version: result.version, value: metadata },
+                    metadata: { version: result.version, value: result.value },
                     agentState: null
                 }
             }

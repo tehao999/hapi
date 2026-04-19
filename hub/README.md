@@ -132,6 +132,12 @@ See `src/web/routes/` for all endpoints.
 - `GET /api/push/vapid-public-key` - Get VAPID public key.
 - `POST /api/push/subscribe` - Subscribe to push notifications.
 - `DELETE /api/push/subscribe` - Unsubscribe.
+- Native push is reserved for final/task-stopping states and human-action-required states:
+  task complete, failed/interrupted, and pending permission/user-input requests.
+  Ordinary assistant text, tool calls, tool results, and passive sync updates must not send native push.
+- Notification-level unread counts are persisted in `session_notification_state`, exposed on session summaries,
+  shown in the session list, included in push payload data/title, and propagated as `totalUnreadCount`
+  so installed iOS/iPadOS Home Screen web apps can update the app-icon badge via the Badging API.
 
 ### CLI (`src/web/routes/cli.ts`)
 
@@ -183,7 +189,7 @@ See `src/telegram/bot.ts` for bot implementation.
 ### Features
 
 - Permission request notifications with approve/deny buttons.
-- Session ready notifications.
+- Session final-state notifications.
 - Deep links to Mini App sessions.
 
 See `src/telegram/callbacks.ts` for button handlers.
@@ -199,6 +205,14 @@ See `src/sync/syncEngine.ts` for the main session/message manager:
 - Event publishing to SSE and Telegram.
 - Git operations and file search.
 - Activity tracking and timeouts.
+
+### Desktop mirror takeover invariants
+
+- A Codex thread mirrored from desktop always has exactly one execution owner: `desktop-sync` or `hapi-runner`.
+- HAPI web/mobile never sends directly into a desktop-owned mirror; it must call `POST /api/sessions/:id/takeover` first.
+- Passive watcher traffic must include the current ownership generation and is ignored when the generation is stale.
+- Matching-generation passive watcher traffic is stored as transcript-only sync even while `hapi-runner` owns the lease; it is never rebroadcast to CLI executors.
+- Runner session shutdown releases control back to `desktop-sync`, allowing the watcher to resume mirroring into the canonical session.
 
 ## Storage
 

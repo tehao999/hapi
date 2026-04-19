@@ -8,6 +8,8 @@ export type PushPayload = {
         type?: string
         sessionId?: string
         url?: string
+        unreadCount?: number
+        totalUnreadCount?: number
     }
 }
 

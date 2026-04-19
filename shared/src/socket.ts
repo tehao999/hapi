@@ -131,9 +131,19 @@ export interface ServerToClientEvents {
     error: (data: { message: string; code?: SocketErrorReason; scope?: 'session' | 'machine'; id?: string }) => void
 }
 
+export type SyncMessageAck = {
+    inserted: true
+} | {
+    inserted: false
+    reason: 'stale-generation' | 'metadata-conflict'
+}
+
 export interface ClientToServerEvents {
     message: (data: { sid: string; message: unknown; localId?: string }) => void
-    'sync-message': (data: { sid: string; message: unknown; localId?: string; source?: 'cli' | 'codex-desktop-sync'; generation?: number }) => void
+    'sync-message': (
+        data: { sid: string; message: unknown; localId?: string; source?: 'cli' | 'codex-desktop-sync'; generation?: number },
+        cb?: (answer: SyncMessageAck) => void
+    ) => void
     'session-alive': (data: {
         sid: string
         time: number

@@ -4,11 +4,20 @@ import { registerRoute } from 'workbox-routing'
 import { CacheFirst, NetworkFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { focusOrOpenNotificationUrl, type NotificationClientsLike } from './lib/notificationClick'
+import { getBadgeCountFromPushPayload, updateAppBadge, type AppBadgeTarget } from './lib/appBadge'
 import { buildNotificationOptions, type PushPayload } from './lib/pushNotification'
 
 declare const self: ServiceWorkerGlobalScope & {
     __WB_MANIFEST: Array<string | { url: string; revision?: string }>
 }
+
+self.addEventListener('install', () => {
+    self.skipWaiting()
+})
+
+self.addEventListener('activate', (event) => {
+    event.waitUntil(self.clients.claim())
+})
 
 precacheAndRoute(self.__WB_MANIFEST)
 
@@ -87,9 +96,13 @@ self.addEventListener('push', (event) => {
     }
 
     const title = payload.title || 'HAPI'
+    const badgeCount = getBadgeCountFromPushPayload(payload)
 
     event.waitUntil(
-        self.registration.showNotification(title, buildNotificationOptions(payload))
+        Promise.all([
+            updateAppBadge(navigator as unknown as AppBadgeTarget, badgeCount),
+            self.registration.showNotification(title, buildNotificationOptions(payload))
+        ]).then(() => undefined)
     )
 })
 

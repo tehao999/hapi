@@ -52,12 +52,18 @@ function createSession(overrides?: Partial<Session>): Session {
 
 function createApp(session: Session) {
     const applySessionConfigCalls: Array<[string, Record<string, unknown>]> = []
+    const readCalls: Array<[string, string]> = []
     const applySessionConfig = async (sessionId: string, config: Record<string, unknown>) => {
         applySessionConfigCalls.push([sessionId, config])
     }
     const engine = {
+        getSessionsByNamespace: () => [session],
+        getSessionUnreadCounts: () => new Map([[session.id, 3]]),
         resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
-        applySessionConfig
+        applySessionConfig,
+        markSessionRead: (sessionId: string, namespace: string) => {
+            readCalls.push([sessionId, namespace])
+        }
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
@@ -67,10 +73,31 @@ function createApp(session: Session) {
     })
     app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
 
-    return { app, applySessionConfigCalls }
+    return { app, applySessionConfigCalls, readCalls }
 }
 
 describe('sessions routes', () => {
+    it('includes notification unread count in session summaries', async () => {
+        const { app } = createApp(createSession())
+
+        const response = await app.request('/api/sessions')
+
+        expect(response.status).toBe(200)
+        const json = await response.json() as { sessions: Array<{ id: string; unreadCount: number }> }
+        expect(json.sessions).toHaveLength(1)
+        expect(json.sessions[0]).toMatchObject({ id: 'session-1', unreadCount: 3 })
+    })
+
+    it('marks notification unread count read for a session', async () => {
+        const { app, readCalls } = createApp(createSession())
+
+        const response = await app.request('/api/sessions/session-1/read', { method: 'POST' })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ ok: true })
+        expect(readCalls).toEqual([['session-1', 'default']])
+    })
+
     it('rejects collaboration mode changes for local Codex sessions', async () => {
         const session = createSession({
             agentState: {

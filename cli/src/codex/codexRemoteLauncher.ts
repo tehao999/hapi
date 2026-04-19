@@ -116,6 +116,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const messageBuffer = this.messageBuffer;
         const appServerClient = this.appServerClient;
         const appServerEventConverter = new AppServerEventConverter();
+        const shouldAutoExitAfterIdleTurn = session.startedBy === 'runner' && session.client.isDesktopMirrorSession();
 
         const normalizeCommand = (value: unknown): string | undefined => {
             if (typeof value === 'string') {
@@ -735,6 +736,16 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         shouldExit: this.shouldExit,
                         sendReady
                     });
+                    if (
+                        shouldAutoExitAfterIdleTurn
+                        && !this.shouldExit
+                        && !pending
+                        && session.queue.size() === 0
+                    ) {
+                        logger.debug('[codex-remote]: desktop mirror takeover turn is idle; exiting runner to return ownership');
+                        this.exitReason = 'exit';
+                        this.shouldExit = true;
+                    }
                 }
                 logActiveHandles('after-turn');
             }

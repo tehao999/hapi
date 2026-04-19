@@ -103,6 +103,9 @@ function createSessionStub() {
                 rpcHandlers.set(method, handler);
             }
         },
+        isDesktopMirrorSession() {
+            return false;
+        },
         updateAgentState(handler: (state: FakeAgentState) => FakeAgentState) {
             agentState = handler(agentState);
         },
@@ -215,5 +218,43 @@ describe('codexRemoteLauncher', () => {
             type: 'task_failed',
             error: 'boom'
         }));
+    });
+
+    it('exits after an idle desktop-mirror takeover turn instead of waiting forever for more messages', async () => {
+        const {
+            session,
+            sessionEvents
+        } = createSessionStub();
+        const desktopMirrorSession = session as any;
+
+        let waits = 0;
+        desktopMirrorSession.startedBy = 'runner';
+        desktopMirrorSession.client.isDesktopMirrorSession = () => true;
+        desktopMirrorSession.queue = {
+            size() {
+                return waits === 0 ? 1 : 0;
+            },
+            reset() {},
+            async waitForMessagesAndGetAsString() {
+                waits += 1;
+                if (waits === 1) {
+                    return {
+                        message: 'desktop mirror follow-up',
+                        mode: createMode(),
+                        isolate: false,
+                        hash: 'hash-1'
+                    };
+                }
+                return await new Promise(() => {});
+            }
+        };
+
+        const exitReason = await Promise.race([
+            codexRemoteLauncher(desktopMirrorSession as never),
+            new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 250))
+        ]);
+
+        expect(exitReason).toBe('exit');
+        expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
     });
 });

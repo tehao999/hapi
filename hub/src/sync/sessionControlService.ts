@@ -44,11 +44,11 @@ export function shouldAcceptPassiveSync(
     if (!current) {
         return { accepted: true, nextControl: initializeDesktopMirrorControl(now) }
     }
-    if (current.owner === 'hapi-runner' && current.leaseExpiresAt && current.leaseExpiresAt > now) {
-        return { accepted: false, nextControl: current }
-    }
     if (generation !== undefined && generation !== current.generation) {
         return { accepted: false, nextControl: current }
+    }
+    if (current.owner === 'hapi-runner' && current.leaseExpiresAt && current.leaseExpiresAt > now) {
+        return { accepted: true, nextControl: current }
     }
     return { accepted: true, nextControl: current.owner === 'desktop-sync' ? current : releaseRunnerControl(current, now) }
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { AssistantRuntimeProvider } from '@assistant-ui/react'
-import { isCodexDesktopMirrorSession } from '@hapi/protocol'
+import { getExecutionControl, isCodexDesktopMirrorSession } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import type {
     AttachmentMetadata,
@@ -66,6 +66,8 @@ export function SessionChat(props: {
         metadata: props.session.metadata,
         messages: props.messages
     })
+    const executionControl = getExecutionControl(props.session.metadata)
+    const desktopMirrorTakeoverRequired = desktopMirrorSession && executionControl?.owner !== 'hapi-runner'
     const controlledByUser = props.session.agentState?.controlledByUser === true
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
     const {
@@ -368,7 +370,7 @@ export function SessionChat(props: {
                 </div>
             ) : null}
 
-            {desktopMirrorSession ? (
+            {desktopMirrorTakeoverRequired ? (
                 <div className="px-3 pt-3">
                     <div className="mx-auto w-full max-w-content rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
                         <div className="font-medium text-[var(--app-text)]">

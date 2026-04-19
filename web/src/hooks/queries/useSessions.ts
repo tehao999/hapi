@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { SessionSummary } from '@/types/api'
+import { getBrowserAppBadgeTarget, getTotalUnreadCountFromSessions, updateAppBadge } from '@/lib/appBadge'
 import { queryKeys } from '@/lib/query-keys'
 
 export function useSessions(api: ApiClient | null): {
@@ -19,6 +21,14 @@ export function useSessions(api: ApiClient | null): {
         },
         enabled: Boolean(api),
     })
+
+    useEffect(() => {
+        if (!query.data) {
+            return
+        }
+        const totalUnreadCount = getTotalUnreadCountFromSessions(query.data.sessions)
+        void updateAppBadge(getBrowserAppBadgeTarget(), totalUnreadCount)
+    }, [query.data])
 
     return {
         sessions: query.data?.sessions ?? [],

@@ -798,7 +798,7 @@ describe('session model', () => {
             'gpt-5.4'
         )
         const rpcGateway = {
-            spawnSession: async () => ({ type: 'success', sessionId: runner.id as const })
+            spawnSession: async () => ({ type: 'success' as const, sessionId: runner.id })
         }
         ;(engine as unknown as { rpcGateway: typeof rpcGateway }).rpcGateway = rpcGateway
         const mirror = engine.getOrCreateSession(
@@ -857,7 +857,7 @@ describe('session model', () => {
             expect(canonical?.metadata?.name).toBe('runner updated concurrently')
             expect(typeof control?.leaseExpiresAt).toBe('number')
             expect((control?.leaseExpiresAt ?? 0) > Date.now()).toBe(true)
-            expect(patchAttempts).toBe(2)
+            expect(patchAttempts).toBe(3)
         } finally {
             engine.stop()
         }
@@ -915,6 +915,147 @@ describe('session model', () => {
         }
     })
 
+    it('takeoverSession acquires runner ownership even when the desktop mirror had no prior execution control', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const engine = new SyncEngine(
+            store,
+            null as never,
+            new RpcRegistry(),
+            { broadcast: () => undefined } as never
+        )
+        ;(engine as unknown as { eventPublisher: EventPublisher }).eventPublisher = createPublisher(events)
+        const runner = engine.getOrCreateSession(
+            'runner-session-no-control',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                codexSessionId: 'thread-no-control'
+            },
+            null,
+            'default',
+            'gpt-5.4'
+        )
+        const rpcGateway = {
+            spawnSession: async () => ({ type: 'success' as const, sessionId: runner.id })
+        }
+        ;(engine as unknown as { rpcGateway: typeof rpcGateway }).rpcGateway = rpcGateway
+        const mirror = engine.getOrCreateSession(
+            'desktop-mirror-no-control',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                mirrorSource: 'codex-desktop-sync',
+                codexSessionId: 'thread-no-control'
+            },
+            null,
+            'default',
+            'gpt-5.4'
+        )
+        engine.getOrCreateMachine('machine-1', { host: 'localhost' }, null, 'default')
+        engine.handleMachineAlive({ machineId: 'machine-1', time: Date.now() })
+        mirror.active = true
+        mirror.thinking = false
+        ;(engine as unknown as { waitForSessionActive: () => Promise<boolean> }).waitForSessionActive = async () => true
+
+        try {
+            const result = await engine.takeoverSession(mirror.id, 'default')
+            const canonical = engine.getSession(runner.id)
+            const control = getExecutionControl(canonical?.metadata)
+
+            expect(result).toEqual({ type: 'success', sessionId: runner.id })
+            expect(canonical?.metadata?.mirrorSource).toBe('codex-desktop-sync')
+            expect(control).toMatchObject({
+                owner: 'hapi-runner',
+                generation: 1,
+                runnerSessionId: runner.id
+            })
+            expect(typeof control?.leaseExpiresAt).toBe('number')
+            expect((control?.leaseExpiresAt ?? 0) > Date.now()).toBe(true)
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('releases runner ownership on session end so desktop sync can resume', () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const engine = new SyncEngine(
+            store,
+            null as never,
+            new RpcRegistry(),
+            { broadcast: () => undefined } as never
+        )
+        ;(engine as unknown as { eventPublisher: EventPublisher }).eventPublisher = createPublisher(events)
+        const session = engine.getOrCreateSession(
+            'session-runner',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                codexSessionId: 'thread-1',
+                mirrorSource: 'codex-desktop-sync',
+                executionControl: {
+                    owner: 'hapi-runner',
+                    generation: 2,
+                    leaseExpiresAt: Date.now() + 60_000,
+                    runnerSessionId: 'session-runner',
+                    updatedAt: Date.now()
+                }
+            },
+            null,
+            'default'
+        )
+
+        engine.handleSessionEnd({ sid: session.id, time: Date.now(), source: 'cli' })
+
+        const updated = engine.getSession(session.id)
+        expect((updated?.metadata as { executionControl?: { owner?: string; generation?: number } }).executionControl?.owner).toBe('desktop-sync')
+        expect((updated?.metadata as { executionControl?: { owner?: string; generation?: number } }).executionControl?.generation).toBe(3)
+    })
+
+    it('releases stale runner ownership for inactive desktop mirrors during the inactivity sweep', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const engine = new SyncEngine(
+            store,
+            null as never,
+            new RpcRegistry(),
+            { broadcast: () => undefined } as never
+        )
+        ;(engine as unknown as { eventPublisher: EventPublisher }).eventPublisher = createPublisher(events)
+        const now = Date.now()
+        const session = engine.getOrCreateSession(
+            'session-runner-stale-lease',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                codexSessionId: 'thread-1',
+                mirrorSource: 'codex-desktop-sync',
+                executionControl: {
+                    owner: 'hapi-runner',
+                    generation: 4,
+                    leaseExpiresAt: now + 10 * 60_000,
+                    runnerSessionId: 'session-runner-stale-lease',
+                    updatedAt: now
+                }
+            },
+            null,
+            'default'
+        )
+
+        expect(getExecutionControl(engine.getSession(session.id)?.metadata)?.owner).toBe('hapi-runner')
+
+        await (engine as unknown as { expireInactive: () => Promise<void> }).expireInactive()
+
+        const updated = engine.getSession(session.id)
+        expect((updated?.metadata as { executionControl?: { owner?: string; generation?: number } }).executionControl?.owner).toBe('desktop-sync')
+        expect((updated?.metadata as { executionControl?: { owner?: string; generation?: number } }).executionControl?.generation).toBe(5)
+    })
+
     it('mergeSessions preserves desktop mirror execution control metadata needed for takeover', async () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []
@@ -963,6 +1104,65 @@ describe('session model', () => {
             leaseExpiresAt: null,
             runnerSessionId: null,
             updatedAt: 7
+        })
+    })
+
+    it('mergeSessions keeps the higher-generation runner ownership when target already has stale mirror control', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const mirror = cache.getOrCreateSession(
+            'desktop-mirror-merge-source-owned',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                mirrorSource: 'codex-desktop-sync',
+                codexSessionId: 'thread-2',
+                executionControl: {
+                    owner: 'hapi-runner',
+                    generation: 8,
+                    leaseExpiresAt: 123456,
+                    runnerSessionId: 'runner-session-2',
+                    updatedAt: 8
+                }
+            },
+            null,
+            'default',
+            'gpt-5.4'
+        )
+        const runner = cache.getOrCreateSession(
+            'desktop-mirror-merge-target-stale',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                mirrorSource: 'codex-desktop-sync',
+                codexSessionId: 'thread-2',
+                executionControl: {
+                    owner: 'desktop-sync',
+                    generation: 1,
+                    leaseExpiresAt: null,
+                    runnerSessionId: null,
+                    updatedAt: 1
+                }
+            },
+            null,
+            'default',
+            'gpt-5.4'
+        )
+
+        await cache.mergeSessions(mirror.id, runner.id, 'default')
+
+        const merged = cache.getSession(runner.id)
+        expect(merged?.metadata?.mirrorSource).toBe('codex-desktop-sync')
+        expect(getExecutionControl(merged?.metadata)).toEqual({
+            owner: 'hapi-runner',
+            generation: 8,
+            leaseExpiresAt: 123456,
+            runnerSessionId: 'runner-session-2',
+            updatedAt: 8
         })
     })
 

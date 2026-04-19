@@ -41,12 +41,15 @@ describe('sessionControlService', () => {
         })
     })
 
-    it('rejects stale passive sync generations after takeover', () => {
+    it('accepts matching passive sync generations after takeover but rejects stale ones', () => {
         const desktop = initializeDesktopMirrorControl(10)
         const runner = acquireRunnerControl(desktop, 'session-runner', 110, 60_000)
 
         expect(shouldAcceptPassiveSync(runner, 1, 120).accepted).toBe(false)
-        expect(shouldAcceptPassiveSync(runner, 2, 120).accepted).toBe(false)
+        expect(shouldAcceptPassiveSync(runner, 2, 120)).toEqual({
+            accepted: true,
+            nextControl: runner
+        })
     })
 
     it('rejects generation mismatches after runner lease expiry', () => {

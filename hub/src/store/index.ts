@@ -6,6 +6,7 @@ import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { PushStore } from './pushStore'
 import { SessionStore } from './sessionStore'
+import { SessionNotificationStateStore } from './sessionNotificationState'
 import { UserStore } from './userStore'
 
 export type {
@@ -20,15 +21,17 @@ export { MachineStore } from './machineStore'
 export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
 export { SessionStore } from './sessionStore'
+export { SessionNotificationStateStore } from './sessionNotificationState'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION: number = 7
+const SCHEMA_VERSION: number = 8
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'messages',
     'users',
-    'push_subscriptions'
+    'push_subscriptions',
+    'session_notification_state'
 ] as const
 
 export class Store {
@@ -40,6 +43,7 @@ export class Store {
     readonly messages: MessageStore
     readonly users: UserStore
     readonly push: PushStore
+    readonly sessionNotifications: SessionNotificationStateStore
 
     constructor(dbPath: string) {
         this.dbPath = dbPath
@@ -81,6 +85,7 @@ export class Store {
         this.messages = new MessageStore(this.db)
         this.users = new UserStore(this.db)
         this.push = new PushStore(this.db)
+        this.sessionNotifications = new SessionNotificationStateStore(this.db)
     }
 
     private initSchema(): void {
@@ -98,61 +103,10 @@ export class Store {
             return
         }
 
-        if (currentVersion === 1 && SCHEMA_VERSION === 2) {
-            this.migrateFromV1ToV2()
+        if (currentVersion > 0 && currentVersion < SCHEMA_VERSION) {
+            this.migrateToCurrentVersion(currentVersion)
             this.setUserVersion(SCHEMA_VERSION)
-            return
-        }
-
-        if (currentVersion === 2 && SCHEMA_VERSION === 3) {
-            this.migrateFromV2ToV3()
-            this.setUserVersion(SCHEMA_VERSION)
-            return
-        }
-
-        if (currentVersion === 3 && SCHEMA_VERSION === 4) {
-            this.migrateFromV3ToV4()
-            this.setUserVersion(SCHEMA_VERSION)
-            return
-        }
-
-        if (currentVersion === 4 && SCHEMA_VERSION === 5) {
-            this.migrateFromV4ToV5()
-            this.setUserVersion(SCHEMA_VERSION)
-            return
-        }
-
-        if (currentVersion === 5 && SCHEMA_VERSION === 6) {
-            this.migrateFromV5ToV6()
-            this.setUserVersion(SCHEMA_VERSION)
-            return
-        }
-
-        if (currentVersion === 6 && SCHEMA_VERSION === 7) {
-            this.migrateFromV6ToV7()
-            this.setUserVersion(SCHEMA_VERSION)
-            return
-        }
-
-        if (currentVersion === 4 && SCHEMA_VERSION === 6) {
-            this.migrateFromV4ToV5()
-            this.migrateFromV5ToV6()
-            this.setUserVersion(SCHEMA_VERSION)
-            return
-        }
-
-        if (currentVersion === 4 && SCHEMA_VERSION === 7) {
-            this.migrateFromV4ToV5()
-            this.migrateFromV5ToV6()
-            this.migrateFromV6ToV7()
-            this.setUserVersion(SCHEMA_VERSION)
-            return
-        }
-
-        if (currentVersion === 5 && SCHEMA_VERSION === 7) {
-            this.migrateFromV5ToV6()
-            this.migrateFromV6ToV7()
-            this.setUserVersion(SCHEMA_VERSION)
+            this.assertRequiredTablesPresent()
             return
         }
 
@@ -238,7 +192,53 @@ export class Store {
                 UNIQUE(namespace, endpoint)
             );
             CREATE INDEX IF NOT EXISTS idx_push_subscriptions_namespace ON push_subscriptions(namespace);
+
+            CREATE TABLE IF NOT EXISTS session_notification_state (
+                namespace TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                unread_count INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(namespace, session_id),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_notification_state_namespace
+                ON session_notification_state(namespace, unread_count);
         `)
+    }
+
+    private migrateToCurrentVersion(currentVersion: number): void {
+        let version = currentVersion
+        if (version === 1) {
+            this.migrateFromV1ToV2()
+            version = 2
+        }
+        if (version === 2) {
+            this.migrateFromV2ToV3()
+            version = 3
+        }
+        if (version === 3) {
+            this.migrateFromV3ToV4()
+            version = 4
+        }
+        if (version === 4) {
+            this.migrateFromV4ToV5()
+            version = 5
+        }
+        if (version === 5) {
+            this.migrateFromV5ToV6()
+            version = 6
+        }
+        if (version === 6) {
+            this.migrateFromV6ToV7()
+            version = 7
+        }
+        if (version === 7) {
+            this.migrateFromV7ToV8()
+            version = 8
+        }
+        if (version !== SCHEMA_VERSION) {
+            throw this.buildSchemaMismatchError(currentVersion)
+        }
     }
 
     private migrateLegacySchemaIfNeeded(): void {
@@ -360,6 +360,21 @@ export class Store {
         if (!columns.has('model_reasoning_effort')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN model_reasoning_effort TEXT')
         }
+    }
+
+    private migrateFromV7ToV8(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_notification_state (
+                namespace TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                unread_count INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(namespace, session_id),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_notification_state_namespace
+                ON session_notification_state(namespace, unread_count);
+        `)
     }
 
     private getSessionColumnNames(): Set<string> {

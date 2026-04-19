@@ -52,6 +52,7 @@ function createApp(args?: {
     const session = args?.session ?? createSession()
     const recentMessages = args?.recentMessages ?? []
     const sendMessageCalls: Array<[string, Record<string, unknown>]> = []
+    const readCalls: Array<[string, string]> = []
 
     const engine = {
         resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
@@ -64,6 +65,9 @@ function createApp(args?: {
                 hasMore: false
             }
         }),
+        markSessionRead: (sessionId: string, namespace: string) => {
+            readCalls.push([sessionId, namespace])
+        },
         sendMessage: async (sessionId: string, payload: Record<string, unknown>) => {
             sendMessageCalls.push([sessionId, payload])
         }
@@ -76,7 +80,7 @@ function createApp(args?: {
     })
     app.route('/api', createMessagesRoutes(() => engine as SyncEngine))
 
-    return { app, sendMessageCalls }
+    return { app, sendMessageCalls, readCalls }
 }
 
 describe('messages routes', () => {

@@ -35,7 +35,11 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const parsed = querySchema.safeParse(c.req.query())
         const limit = parsed.success ? (parsed.data.limit ?? 50) : 50
         const beforeSeq = parsed.success ? (parsed.data.beforeSeq ?? null) : null
-        return c.json(engine.getMessagesPage(sessionId, { limit, beforeSeq }))
+        const page = engine.getMessagesPage(sessionId, { limit, beforeSeq })
+        if (beforeSeq === null) {
+            engine.markSessionRead(sessionId, c.get('namespace'))
+        }
+        return c.json(page)
     })
 
     app.post('/sessions/:id/messages', async (c) => {

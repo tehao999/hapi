@@ -25,7 +25,7 @@ import {
     type RpcReadFileResponse,
     type RpcUploadFileResponse
 } from './rpcGateway'
-import { acquireRunnerControl } from './sessionControlService'
+import { acquireRunnerControl, releaseRunnerControl } from './sessionControlService'
 import { SessionCache } from './sessionCache'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
@@ -57,7 +57,7 @@ export class SyncEngine {
     private inactivityTimer: NodeJS.Timeout | null = null
 
     constructor(
-        store: Store,
+        private readonly store: Store,
         io: Server,
         rpcRegistry: RpcRegistry,
         sseManager: SSEManager
@@ -68,7 +68,9 @@ export class SyncEngine {
         this.messageService = new MessageService(store, io, this.eventPublisher)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.reloadAll()
-        this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
+        this.inactivityTimer = setInterval(() => {
+            void this.expireInactive()
+        }, 5_000)
     }
 
     stop(): void {
@@ -101,6 +103,25 @@ export class SyncEngine {
 
     getSessionsByNamespace(namespace: string): Session[] {
         return this.sessionCache.getSessionsByNamespace(namespace)
+    }
+
+    getSessionUnreadCounts(namespace: string): Map<string, number> {
+        return this.store.sessionNotifications.getUnreadCountsByNamespace(namespace)
+    }
+
+    getTotalNotificationUnread(namespace: string): number {
+        return this.store.sessionNotifications.getTotalUnreadCountByNamespace(namespace)
+    }
+
+    incrementSessionNotificationUnread(sessionId: string, namespace: string): number {
+        const unreadCount = this.store.sessionNotifications.incrementUnread(sessionId, namespace)
+        this.eventPublisher.emit({ type: 'session-updated', sessionId, namespace })
+        return unreadCount
+    }
+
+    markSessionRead(sessionId: string, namespace: string): void {
+        this.store.sessionNotifications.clearUnread(sessionId, namespace)
+        this.eventPublisher.emit({ type: 'session-updated', sessionId, namespace })
     }
 
     getSession(sessionId: string): Session | undefined {
@@ -210,7 +231,15 @@ export class SyncEngine {
         this.sessionCache.handleSessionAlive(payload)
     }
 
-    handleSessionEnd(payload: { sid: string; time: number }): void {
+    handleSessionEnd(payload: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync' }): void {
+        const session = this.sessionCache.getSession(payload.sid)
+        const control = getExecutionControl(session?.metadata)
+        if (payload.source !== 'codex-desktop-sync' && session?.metadata && control?.owner === 'hapi-runner') {
+            void this.sessionCache.patchSessionMetadata(payload.sid, session.namespace, (current) => ({
+                ...current,
+                executionControl: releaseRunnerControl(getExecutionControl(current), payload.time)
+            }))
+        }
         this.sessionCache.handleSessionEnd(payload)
         // Retry dedup now that this session is inactive — a prior dedup may have
         // skipped it because it was still active at the time.
@@ -225,8 +254,9 @@ export class SyncEngine {
         this.machineCache.handleMachineAlive(payload)
     }
 
-    private expireInactive(): void {
-        const expired = this.sessionCache.expireInactive()
+    private async expireInactive(): Promise<void> {
+        const now = Date.now()
+        const expired = this.sessionCache.expireInactive(now)
         // Sort by most recent first so dedup keeps the newest session when multiple
         // duplicates for the same agent thread expire in the same sweep.
         const sorted = expired
@@ -236,6 +266,33 @@ export class SyncEngine {
         for (const session of sorted) {
             this.triggerDedupIfNeeded(session.id)
         }
+        await Promise.all(
+            this.getSessions()
+                .filter((session) => {
+                    if (session.active) {
+                        return false
+                    }
+                    const control = getExecutionControl(session.metadata)
+                    return isCodexDesktopMirrorSession({ metadata: session.metadata, messages: null })
+                        && control?.owner === 'hapi-runner'
+                })
+                .map(async (session) => {
+                    try {
+                        await this.sessionCache.patchSessionMetadata(session.id, session.namespace, (current) => {
+                            const control = getExecutionControl(current)
+                            if (!control || control.owner !== 'hapi-runner') {
+                                return current
+                            }
+                            return {
+                                ...current,
+                                executionControl: releaseRunnerControl(control, now)
+                            }
+                        })
+                    } catch {
+                        // best-effort: a concurrent owner update can win; the next sweep will re-check
+                    }
+                })
+        )
         this.machineCache.expireInactive()
     }
 
@@ -421,8 +478,14 @@ export class SyncEngine {
             return resumed
         }
 
-        if (this.getSession(resumed.sessionId)) {
-            const patchResult = await this.patchTakeoverMetadata(resumed.sessionId, namespace, sourceExecutionControl)
+        const canonical = this.getSession(resumed.sessionId)
+        if (canonical && getExecutionControl(canonical.metadata)?.owner !== 'hapi-runner') {
+            const patchResult = await this.patchRunnerOwnership(
+                resumed.sessionId,
+                namespace,
+                resumed.sessionId,
+                sourceExecutionControl
+            )
             if (patchResult.type === 'error') {
                 return patchResult
             }
@@ -431,10 +494,11 @@ export class SyncEngine {
         return resumed
     }
 
-    private async patchTakeoverMetadata(
+    private async patchRunnerOwnership(
         sessionId: string,
         namespace: string,
-        sourceExecutionControl: ReturnType<typeof getExecutionControl>
+        runnerSessionId: string,
+        sourceExecutionControl?: ReturnType<typeof getExecutionControl>
     ): Promise<{ type: 'success' } | { type: 'error'; message: string; code: 'resume_failed' }> {
         for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
@@ -443,7 +507,7 @@ export class SyncEngine {
                     mirrorSource: 'codex-desktop-sync',
                     executionControl: acquireRunnerControl(
                         sourceExecutionControl ?? getExecutionControl(current),
-                        sessionId,
+                        runnerSessionId,
                         Date.now(),
                         15 * 60_000
                     )
@@ -536,6 +600,20 @@ export class SyncEngine {
         const becameActive = await this.waitForSessionActive(spawnResult.sessionId)
         if (!becameActive) {
             return { type: 'error', message: 'Session failed to become active', code: 'resume_failed' }
+        }
+
+        if (metadata.mirrorSource === 'codex-desktop-sync' && spawnResult.sessionId !== access.sessionId) {
+            const sourceSession = this.sessionCache.getSessionByNamespace(access.sessionId, namespace)
+            if (sourceSession) {
+                const controlResult = await this.patchRunnerOwnership(
+                    access.sessionId,
+                    namespace,
+                    spawnResult.sessionId
+                )
+                if (controlResult.type === 'error') {
+                    return controlResult
+                }
+            }
         }
 
         if (spawnResult.sessionId !== access.sessionId) {

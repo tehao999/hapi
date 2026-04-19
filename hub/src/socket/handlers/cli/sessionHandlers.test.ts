@@ -41,18 +41,20 @@ class FakeSocket {
         }
     }
 
-    trigger(event: string, data?: unknown): void {
+    trigger(event: string, ...args: unknown[]): void {
         const handler = this.handlers.get(event)
         if (!handler) return
-        if (typeof data === 'undefined') {
-            handler()
-            return
-        }
-        handler(data)
+        handler(...args)
     }
 }
 
-function createHarness() {
+type CreateHarnessOptions = {
+    metadataUpdateResult?: 'success' | 'version-mismatch' | 'error'
+    sessionMetadata?: Record<string, unknown>
+}
+
+function createHarness(options: CreateHarnessOptions = {}) {
+    const { metadataUpdateResult = 'success', sessionMetadata } = options
     const socket = new FakeSocket()
     const storedMessages: Array<{ sid: string; content: unknown; localId?: string }> = []
     const webappEvents: WebappEvent[] = []
@@ -64,14 +66,15 @@ function createHarness() {
         options?: { touchUpdatedAt?: boolean }
     }> = []
     let seq = 0
+    const baseMetadata: Record<string, unknown> = {
+        path: '/tmp/project',
+        host: 'localhost',
+        flavor: 'codex'
+    }
     const session = {
         namespace: 'default',
         metadataVersion: 3,
-        metadata: {
-            path: '/tmp/project',
-            host: 'localhost',
-            flavor: 'codex'
-        },
+        metadata: { ...baseMetadata, ...(sessionMetadata ?? {}) },
         teamState: null
     }
     const store = {
@@ -97,9 +100,19 @@ function createHarness() {
                 metadata: unknown,
                 expectedVersion: number,
                 namespace: string,
-                options?: { touchUpdatedAt?: boolean }
+                updateOptions?: { touchUpdatedAt?: boolean }
             ) {
-                metadataUpdates.push({ sid, metadata, expectedVersion, namespace, options })
+                metadataUpdates.push({ sid, metadata, expectedVersion, namespace, options: updateOptions })
+                if (metadataUpdateResult === 'version-mismatch') {
+                    return {
+                        result: 'version-mismatch' as const,
+                        version: session.metadataVersion + 1,
+                        value: session.metadata
+                    }
+                }
+                if (metadataUpdateResult === 'error') {
+                    return { result: 'error' as const }
+                }
                 session.metadata = metadata as typeof session.metadata
                 session.metadataVersion += 1
                 return {
@@ -154,6 +167,7 @@ describe('cli session handlers', () => {
 
     it('stores passive sync messages for web without broadcasting them to CLI executors', () => {
         const { socket, storedMessages, webappEvents, metadataUpdates } = createHarness()
+        let ack: unknown = null
 
         socket.trigger('sync-message', {
             sid: 'session-1',
@@ -162,9 +176,12 @@ describe('cli session handlers', () => {
                 role: 'user',
                 content: { type: 'text', text: 'message typed in Codex desktop' }
             }
+        }, (value: unknown) => {
+            ack = value
         })
 
         expect(storedMessages).toHaveLength(1)
+        expect(ack).toEqual({ inserted: true })
         expect(storedMessages[0]?.content).toEqual({
             role: 'user',
             content: { type: 'text', text: 'message typed in Codex desktop' },
@@ -200,8 +217,135 @@ describe('cli session handlers', () => {
         expect(typeof (metadataUpdates[0]?.metadata as { executionControl?: { updatedAt?: unknown } }).executionControl?.updatedAt).toBe('number')
     })
 
-    it('drops passive sync writes when hapi-runner owns the lease', () => {
-        const { socket, storedMessages, metadataUpdates, session } = createHarness()
+    it('rejects passive sync writes with stale generation before storing or broadcasting', () => {
+        const { socket, storedMessages, webappEvents, metadataUpdates } = createHarness({
+            sessionMetadata: {
+                mirrorSource: 'codex-desktop-sync',
+                executionControl: {
+                    owner: 'desktop-sync',
+                    generation: 2,
+                    leaseExpiresAt: null,
+                    runnerSessionId: null,
+                    updatedAt: Date.now()
+                }
+            }
+        })
+        let ack: unknown = null
+
+        socket.trigger('sync-message', {
+            sid: 'session-1',
+            source: 'codex-desktop-sync',
+            generation: 1,
+            localId: 'codex:thread-1:77:stale-generation',
+            message: {
+                role: 'agent',
+                content: { type: 'codex', data: { type: 'message', message: 'stale generation replay' } }
+            }
+        }, (value: unknown) => {
+            ack = value
+        })
+
+        expect(ack).toEqual({ inserted: false, reason: 'stale-generation' })
+        expect(storedMessages).toHaveLength(0)
+        expect(metadataUpdates).toHaveLength(0)
+        expect(socket.roomEmits).toHaveLength(0)
+        expect(webappEvents).toHaveLength(0)
+    })
+
+    for (const metadataUpdateResult of ['version-mismatch', 'error'] as const) {
+        it(`rejects passive sync writes when metadata update returns ${metadataUpdateResult}`, () => {
+            const { socket, storedMessages, webappEvents, metadataUpdates } = createHarness({ metadataUpdateResult })
+            let ack: unknown = null
+
+            socket.trigger('sync-message', {
+                sid: 'session-1',
+                source: 'codex-desktop-sync',
+                generation: 1,
+                localId: `codex:thread-1:88:${metadataUpdateResult}`,
+                message: {
+                    role: 'user',
+                    content: { type: 'text', text: `metadata ${metadataUpdateResult}` }
+                }
+            }, (value: unknown) => {
+                ack = value
+            })
+
+            expect(ack).toEqual({ inserted: false, reason: 'metadata-conflict' })
+            expect(storedMessages).toHaveLength(0)
+            expect(metadataUpdates).toHaveLength(1)
+            expect(socket.roomEmits).toHaveLength(0)
+            expect(webappEvents).toHaveLength(0)
+        })
+    }
+
+    it('preserves desktop takeover metadata when CLI sends a partial metadata snapshot', () => {
+        const updatedAt = Date.now()
+        const { socket, metadataUpdates, session } = createHarness({
+            sessionMetadata: {
+                mirrorSource: 'codex-desktop-sync',
+                executionControl: {
+                    owner: 'hapi-runner',
+                    generation: 8,
+                    leaseExpiresAt: updatedAt + 60_000,
+                    runnerSessionId: 'runner-session',
+                    updatedAt
+                }
+            }
+        })
+        let ack: unknown = null
+
+        socket.trigger('update-metadata', {
+            sid: 'session-1',
+            expectedVersion: 3,
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                summary: {
+                    text: 'runner metadata update',
+                    updatedAt: updatedAt + 1
+                }
+            }
+        }, (value: unknown) => {
+            ack = value
+        })
+
+        expect(metadataUpdates).toHaveLength(1)
+        expect(metadataUpdates[0]).toMatchObject({
+            sid: 'session-1',
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                mirrorSource: 'codex-desktop-sync',
+                executionControl: {
+                    owner: 'hapi-runner',
+                    generation: 8,
+                    runnerSessionId: 'runner-session'
+                },
+                summary: {
+                    text: 'runner metadata update',
+                    updatedAt: updatedAt + 1
+                }
+            }
+        })
+        expect(ack).toMatchObject({
+            result: 'success',
+            metadata: metadataUpdates[0]?.metadata
+        })
+        expect(session.metadata).toMatchObject({
+            mirrorSource: 'codex-desktop-sync',
+            executionControl: {
+                owner: 'hapi-runner',
+                generation: 8,
+                runnerSessionId: 'runner-session'
+            }
+        })
+    })
+
+    it('stores passive sync writes during hapi-runner ownership when generation matches', () => {
+        const { socket, storedMessages, metadataUpdates, webappEvents, session } = createHarness()
+        let ack: unknown = null
 
         session.metadata = {
             ...session.metadata,
@@ -225,9 +369,18 @@ describe('cli session handlers', () => {
                 role: 'agent',
                 content: { type: 'codex', data: { type: 'message', message: 'stale mirror replay' } }
             }
+        }, (value: unknown) => {
+            ack = value
         })
 
-        expect(storedMessages).toHaveLength(0)
+        expect(ack).toEqual({ inserted: true })
+        expect(storedMessages).toHaveLength(1)
         expect(metadataUpdates).toHaveLength(0)
+        expect(webappEvents).toEqual([
+            expect.objectContaining({
+                type: 'message-received',
+                sessionId: 'session-1'
+            })
+        ])
     })
 })
