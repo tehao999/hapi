@@ -370,7 +370,13 @@ function NewSessionPage() {
     const navigate = useNavigate()
     const goBack = useAppGoBack()
     const queryClient = useQueryClient()
-    const { machines, isLoading: machinesLoading, error: machinesError } = useMachines(api, true)
+    const {
+        machines,
+        knownMachinesCount,
+        offlineMachinesCount,
+        isLoading: machinesLoading,
+        error: machinesError
+    } = useMachines(api, true)
     const { t } = useTranslation()
 
     const handleCancel = useCallback(() => {
@@ -418,6 +424,8 @@ function NewSessionPage() {
                 <NewSession
                     api={api}
                     machines={machines}
+                    knownMachinesCount={knownMachinesCount}
+                    offlineMachinesCount={offlineMachinesCount}
                     isLoading={machinesLoading}
                     onCancel={handleCancel}
                     onSuccess={handleSuccess}

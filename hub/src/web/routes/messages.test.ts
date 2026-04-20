@@ -84,6 +84,24 @@ function createApp(args?: {
 }
 
 describe('messages routes', () => {
+    it('does not mark latest messages read unless requested', async () => {
+        const { app, readCalls } = createApp()
+
+        const response = await app.request('/api/sessions/session-1/messages?limit=50')
+
+        expect(response.status).toBe(200)
+        expect(readCalls).toEqual([])
+    })
+
+    it('marks latest messages read when requested by an active viewer', async () => {
+        const { app, readCalls } = createApp()
+
+        const response = await app.request('/api/sessions/session-1/messages?limit=50&markRead=true')
+
+        expect(response.status).toBe(200)
+        expect(readCalls).toEqual([['session-1', 'default']])
+    })
+
     it('requires takeover before sends enter a desktop-owned mirror session', async () => {
         const { app, sendMessageCalls } = createApp({
             session: createSession({

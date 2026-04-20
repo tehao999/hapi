@@ -8,7 +8,8 @@ import { requireSessionFromParam, requireSyncEngine } from './guards'
 
 const querySchema = z.object({
     limit: z.coerce.number().int().min(1).max(200).optional(),
-    beforeSeq: z.coerce.number().int().min(1).optional()
+    beforeSeq: z.coerce.number().int().min(1).optional(),
+    markRead: z.enum(['true', '1']).optional()
 })
 
 const sendMessageBodySchema = z.object({
@@ -36,7 +37,7 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const limit = parsed.success ? (parsed.data.limit ?? 50) : 50
         const beforeSeq = parsed.success ? (parsed.data.beforeSeq ?? null) : null
         const page = engine.getMessagesPage(sessionId, { limit, beforeSeq })
-        if (beforeSeq === null) {
+        if (beforeSeq === null && parsed.success && parsed.data.markRead) {
             engine.markSessionRead(sessionId, c.get('namespace'))
         }
         return c.json(page)

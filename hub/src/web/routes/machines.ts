@@ -29,8 +29,13 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const namespace = c.get('namespace')
+        const allMachines = engine.getMachinesByNamespace(namespace)
         const machines = engine.getOnlineMachinesByNamespace(namespace)
-        return c.json({ machines })
+        return c.json({
+            machines,
+            knownMachinesCount: allMachines.length,
+            offlineMachinesCount: Math.max(allMachines.length - machines.length, 0)
+        })
     })
 
     app.post('/machines/:id/spawn', async (c) => {

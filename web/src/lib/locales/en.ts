@@ -287,6 +287,8 @@ export default {
 
   // Misc
   'misc.noMachines': 'No machines available',
+  'misc.noOnlineMachines': 'No online machines',
+  'newSession.offlineMachinesHelp': 'Known machines exist, but none are online. Start or restart HAPI Runner on your computer.',
   'misc.machine': 'Machine',
   'misc.collaborationMode': 'Collaboration Mode',
   'misc.permissionMode': 'Permission Mode',

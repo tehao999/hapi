@@ -95,7 +95,11 @@ export type MessagesResponse = {
     }
 }
 
-export type MachinesResponse = { machines: Machine[] }
+export type MachinesResponse = {
+    machines: Machine[]
+    knownMachinesCount: number
+    offlineMachinesCount: number
+}
 export type MachinePathsExistsResponse = { exists: Record<string, boolean> }
 
 export type SpawnResponse =

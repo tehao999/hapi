@@ -189,7 +189,7 @@ export class ApiClient {
         return await this.request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}`)
     }
 
-    async getMessages(sessionId: string, options: { beforeSeq?: number | null; limit?: number }): Promise<MessagesResponse> {
+    async getMessages(sessionId: string, options: { beforeSeq?: number | null; limit?: number; markRead?: boolean }): Promise<MessagesResponse> {
         const params = new URLSearchParams()
         if (options.beforeSeq !== undefined && options.beforeSeq !== null) {
             params.set('beforeSeq', `${options.beforeSeq}`)
@@ -197,10 +197,19 @@ export class ApiClient {
         if (options.limit !== undefined && options.limit !== null) {
             params.set('limit', `${options.limit}`)
         }
+        if (options.markRead) {
+            params.set('markRead', 'true')
+        }
 
         const qs = params.toString()
         const url = `/api/sessions/${encodeURIComponent(sessionId)}/messages${qs ? `?${qs}` : ''}`
         return await this.request<MessagesResponse>(url)
+    }
+
+    async markSessionRead(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/read`, {
+            method: 'POST'
+        })
     }
 
     async getGitStatus(sessionId: string): Promise<GitCommandResponse> {

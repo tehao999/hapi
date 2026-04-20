@@ -30,6 +30,8 @@ import { formatRunnerSpawnError } from '../../utils/formatRunnerSpawnError'
 export function NewSession(props: {
     api: ApiClient
     machines: Machine[]
+    knownMachinesCount?: number
+    offlineMachinesCount?: number
     isLoading?: boolean
     onSuccess: (sessionId: string) => void
     onCancel: () => void
@@ -285,6 +287,8 @@ export function NewSession(props: {
         <div className="flex flex-col divide-y divide-[var(--app-divider)]">
             <MachineSelector
                 machines={props.machines}
+                knownMachinesCount={props.knownMachinesCount}
+                offlineMachinesCount={props.offlineMachinesCount}
                 machineId={machineId}
                 isLoading={props.isLoading}
                 isDisabled={isFormDisabled}

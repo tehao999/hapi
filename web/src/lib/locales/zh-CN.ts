@@ -289,6 +289,8 @@ export default {
 
   // Misc
   'misc.noMachines': '无可用机器',
+  'misc.noOnlineMachines': '没有在线机器',
+  'newSession.offlineMachinesHelp': '检测到已有机器，但当前都不在线。请在电脑上启动或重启 HAPI Runner。',
   'misc.machine': '机器',
   'misc.collaborationMode': '协作模式',
   'misc.permissionMode': '权限模式',

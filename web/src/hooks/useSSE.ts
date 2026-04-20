@@ -437,6 +437,20 @@ export function useSSE(options: {
             })
         }
 
+        const withMachineCounts = (
+            previous: MachinesResponse,
+            machines: Machine[],
+            knownMachinesCount: number
+        ): MachinesResponse => {
+            const knownCount = Math.max(knownMachinesCount, machines.length)
+            return {
+                ...previous,
+                machines,
+                knownMachinesCount: knownCount,
+                offlineMachinesCount: Math.max(knownCount - machines.length, 0)
+            }
+        }
+
         const upsertMachine = (machine: Machine) => {
             queryClient.setQueryData<MachinesResponse | undefined>(queryKeys.machines, (previous) => {
                 if (!previous) {
@@ -445,10 +459,11 @@ export function useSSE(options: {
 
                 const nextMachines = previous.machines.slice()
                 const index = nextMachines.findIndex((item) => item.id === machine.id)
+                const previousKnownCount = previous.knownMachinesCount ?? previous.machines.length
                 if (!machine.active) {
                     if (index >= 0) {
                         nextMachines.splice(index, 1)
-                        return { ...previous, machines: nextMachines }
+                        return withMachineCounts(previous, nextMachines, Math.max(previousKnownCount, previous.machines.length))
                     }
                     return previous
                 }
@@ -458,7 +473,24 @@ export function useSSE(options: {
                 } else {
                     nextMachines.push(machine)
                 }
-                return { ...previous, machines: nextMachines }
+                return withMachineCounts(previous, nextMachines, Math.max(previousKnownCount, nextMachines.length))
+            })
+        }
+
+        const markMachineOffline = (machineId: string) => {
+            queryClient.setQueryData<MachinesResponse | undefined>(queryKeys.machines, (previous) => {
+                if (!previous) {
+                    return previous
+                }
+                const nextMachines = previous.machines.filter((item) => item.id !== machineId)
+                if (nextMachines.length === previous.machines.length) {
+                    return previous
+                }
+                return withMachineCounts(
+                    previous,
+                    nextMachines,
+                    Math.max(previous.knownMachinesCount ?? previous.machines.length, previous.machines.length)
+                )
             })
         }
 
@@ -468,10 +500,12 @@ export function useSSE(options: {
                     return previous
                 }
                 const nextMachines = previous.machines.filter((item) => item.id !== machineId)
-                if (nextMachines.length === previous.machines.length) {
-                    return previous
-                }
-                return { ...previous, machines: nextMachines }
+                const wasKnownOnline = nextMachines.length !== previous.machines.length
+                const nextKnownCount = Math.max(
+                    (previous.knownMachinesCount ?? previous.machines.length) - (wasKnownOnline ? 1 : 0),
+                    nextMachines.length
+                )
+                return withMachineCounts(previous, nextMachines, nextKnownCount)
             })
         }
 
@@ -535,8 +569,10 @@ export function useSSE(options: {
             if (event.type === 'machine-updated') {
                 if (isMachineRecord(event.data)) {
                     upsertMachine(event.data)
-                } else if (event.data === null || isInactiveMachinePatch(event.data)) {
+                } else if (event.data === null) {
                     removeMachine(event.machineId)
+                } else if (isInactiveMachinePatch(event.data)) {
+                    markMachineOffline(event.machineId)
                 } else if (!hasRecordShape(event.data) || typeof event.data.activeAt !== 'number') {
                     queueMachinesInvalidation()
                 }

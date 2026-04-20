@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import type { DecryptedMessage } from '@/types/api'
+import type { DecryptedMessage, SessionsResponse } from '@/types/api'
 import {
     clearMessageWindow,
     fetchLatestMessages,
@@ -11,6 +12,8 @@ import {
     subscribeMessageWindow,
     type MessageWindowState,
 } from '@/lib/message-window-store'
+import { shouldMarkSessionRead } from '@/lib/readState'
+import { queryKeys } from '@/lib/query-keys'
 
 const EMPTY_STATE: MessageWindowState = {
     sessionId: 'unknown',
@@ -27,6 +30,28 @@ const EMPTY_STATE: MessageWindowState = {
     messagesVersion: 0,
 }
 
+function clearSessionUnreadCount(queryClient: QueryClient, sessionId: string): void {
+    queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions, (previous) => {
+        if (!previous) {
+            return previous
+        }
+
+        let changed = false
+        const sessions = previous.sessions.map((session) => {
+            if (session.id !== sessionId || session.unreadCount === 0) {
+                return session
+            }
+            changed = true
+            return {
+                ...session,
+                unreadCount: 0
+            }
+        })
+
+        return changed ? { ...previous, sessions } : previous
+    })
+}
+
 export function useMessages(api: ApiClient | null, sessionId: string | null): {
     messages: DecryptedMessage[]
     warning: string | null
@@ -40,6 +65,7 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     flushPending: () => Promise<void>
     setAtBottom: (atBottom: boolean) => void
 } {
+    const queryClient = useQueryClient()
     const state = useSyncExternalStore(
         useCallback((listener) => {
             if (!sessionId) {
@@ -56,12 +82,50 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         () => EMPTY_STATE
     )
 
+    const markReadIfActive = useCallback(async () => {
+        if (!api || !sessionId || !shouldMarkSessionRead()) {
+            return
+        }
+
+        try {
+            await api.markSessionRead(sessionId)
+            clearSessionUnreadCount(queryClient, sessionId)
+            void Promise.all([
+                queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) }),
+            ]).catch(() => {})
+        } catch {
+        }
+    }, [api, queryClient, sessionId])
+
     useEffect(() => {
         if (!api || !sessionId) {
             return
         }
         void fetchLatestMessages(api, sessionId)
-    }, [api, sessionId])
+        void markReadIfActive()
+    }, [api, markReadIfActive, sessionId])
+
+    useEffect(() => {
+        if (!api || !sessionId) {
+            return
+        }
+
+        const onActive = () => {
+            void markReadIfActive()
+        }
+
+        window.addEventListener('focus', onActive)
+        document.addEventListener('visibilitychange', onActive)
+        return () => {
+            window.removeEventListener('focus', onActive)
+            document.removeEventListener('visibilitychange', onActive)
+        }
+    }, [api, markReadIfActive, sessionId])
+
+    useEffect(() => {
+        void markReadIfActive()
+    }, [markReadIfActive, state.messagesVersion])
 
     useEffect(() => {
         if (!sessionId) {
@@ -81,15 +145,17 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     const refetch = useCallback(async () => {
         if (!api || !sessionId) return
         await fetchLatestMessages(api, sessionId)
-    }, [api, sessionId])
+        await markReadIfActive()
+    }, [api, markReadIfActive, sessionId])
 
     const flushPending = useCallback(async () => {
         if (!sessionId) return
         const needsRefresh = flushPendingMessages(sessionId)
         if (needsRefresh && api) {
             await fetchLatestMessages(api, sessionId)
+            await markReadIfActive()
         }
-    }, [api, sessionId])
+    }, [api, markReadIfActive, sessionId])
 
     const setAtBottom = useCallback((atBottom: boolean) => {
         if (!sessionId) return

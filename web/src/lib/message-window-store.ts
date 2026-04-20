@@ -368,7 +368,11 @@ export function seedMessageWindowFromSession(fromSessionId: string, toSessionId:
     setState(toSessionId, next)
 }
 
-export async function fetchLatestMessages(api: ApiClient, sessionId: string): Promise<void> {
+export async function fetchLatestMessages(
+    api: ApiClient,
+    sessionId: string,
+    options?: { markRead?: boolean }
+): Promise<void> {
     const initial = getState(sessionId)
     if (initial.isLoading) {
         return
@@ -376,7 +380,11 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
     updateState(sessionId, (prev) => buildState(prev, { isLoading: true, warning: null }))
 
     try {
-        const response = await api.getMessages(sessionId, { limit: PAGE_SIZE, beforeSeq: null })
+        const response = await api.getMessages(sessionId, {
+            limit: PAGE_SIZE,
+            beforeSeq: null,
+            markRead: options?.markRead
+        })
         updateState(sessionId, (prev) => {
             if (prev.atBottom) {
                 const merged = mergeMessages(prev.messages, [...prev.pending, ...response.messages])
