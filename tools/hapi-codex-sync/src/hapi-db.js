@@ -127,6 +127,27 @@ function agentMessageSignature(message) {
   });
 }
 
+function parsedAgentMessage(message) {
+  if (!message || message.role !== 'agent') return null;
+  const content = message.content;
+  if (!content || content.type !== 'codex') return null;
+  const data = content.data;
+  if (!data || data.type !== 'message' || typeof data.message !== 'string') return null;
+  return {
+    message: data.message,
+    phase: typeof data.phase === 'string' ? data.phase : null
+  };
+}
+
+function agentMessagesEquivalent(existing, incoming) {
+  const left = parsedAgentMessage(existing);
+  const right = parsedAgentMessage(incoming);
+  if (!left || !right) return false;
+  if (left.message !== right.message) return false;
+  if (left.phase === right.phase) return true;
+  return left.phase === null || right.phase === null;
+}
+
 function agentToolSignature(message) {
   if (!message || message.role !== 'agent') return null;
   const content = message.content;
@@ -141,8 +162,7 @@ function agentToolSignature(message) {
 }
 
 function findAgentTextDuplicate(dbPath, sessionId, message, createdAt, windowMs = 2000) {
-  const signature = agentMessageSignature(message);
-  if (!signature) return null;
+  if (!parsedAgentMessage(message)) return null;
   const created = Number(createdAt || 0);
   const rows = sqliteJson(dbPath, `
     select seq, content from messages
@@ -153,7 +173,7 @@ function findAgentTextDuplicate(dbPath, sessionId, message, createdAt, windowMs 
   for (const row of rows) {
     try {
       const existing = JSON.parse(row.content);
-      if (agentMessageSignature(existing) === signature) return row.seq;
+      if (agentMessagesEquivalent(existing, message)) return row.seq;
     } catch {
       // ignore malformed existing messages
     }

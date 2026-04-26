@@ -143,3 +143,71 @@ test('skips semantic duplicate message even when local_id differs', () => {
   const rows = JSON.parse(execFileSync('sqlite3', ['-json', dbPath, 'select count(*) as n from messages']).toString());
   assert.equal(rows[0].n, 1);
 });
+
+test('dedupes nearby assistant final answer replay when live copy omitted phase', () => {
+  const dbPath = tempDb();
+  const first = insertMessageIfMissing(dbPath, {
+    sessionId: 'hapi-1',
+    localId: null,
+    createdAt: 4000,
+    message: {
+      role: 'agent',
+      content: { type: 'codex', data: { type: 'message', message: 'same final answer' } },
+      meta: { sentFrom: 'cli' }
+    }
+  }, {
+    agentTextDuplicate: true,
+    agentTextDuplicateWindowMs: 2000
+  });
+  const second = insertMessageIfMissing(dbPath, {
+    sessionId: 'hapi-1',
+    localId: 'codex:codex-1:99:def',
+    createdAt: 5000,
+    message: {
+      role: 'agent',
+      content: { type: 'codex', data: { type: 'message', message: 'same final answer', phase: 'final_answer' } }
+    }
+  }, {
+    agentTextDuplicate: true,
+    agentTextDuplicateWindowMs: 2000
+  });
+
+  assert.equal(first.inserted, true);
+  assert.deepEqual(second, { inserted: false, seq: 1 });
+  const rows = JSON.parse(execFileSync('sqlite3', ['-json', dbPath, 'select count(*) as n from messages']).toString());
+  assert.equal(rows[0].n, 1);
+});
+
+test('dedupes nearby assistant commentary replay when live copy omitted phase', () => {
+  const dbPath = tempDb();
+  const first = insertMessageIfMissing(dbPath, {
+    sessionId: 'hapi-1',
+    localId: null,
+    createdAt: 4000,
+    message: {
+      role: 'agent',
+      content: { type: 'codex', data: { type: 'message', message: 'same commentary line' } },
+      meta: { sentFrom: 'cli' }
+    }
+  }, {
+    agentTextDuplicate: true,
+    agentTextDuplicateWindowMs: 2000
+  });
+  const second = insertMessageIfMissing(dbPath, {
+    sessionId: 'hapi-1',
+    localId: 'codex:codex-1:100:ghi',
+    createdAt: 5000,
+    message: {
+      role: 'agent',
+      content: { type: 'codex', data: { type: 'message', message: 'same commentary line', phase: 'commentary' } }
+    }
+  }, {
+    agentTextDuplicate: true,
+    agentTextDuplicateWindowMs: 2000
+  });
+
+  assert.equal(first.inserted, true);
+  assert.deepEqual(second, { inserted: false, seq: 1 });
+  const rows = JSON.parse(execFileSync('sqlite3', ['-json', dbPath, 'select count(*) as n from messages']).toString());
+  assert.equal(rows[0].n, 1);
+});
