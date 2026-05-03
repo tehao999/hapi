@@ -64,7 +64,7 @@ export function HappyUserMessage() {
         <MessagePrimitive.Root className={`${userBubbleClass} group/msg`}>
             <div className="flex items-end gap-2">
                 <div className="flex-1 min-w-0">
-                    {hasText && <LazyRainbowText text={text} />}
+                    {hasText && <LazyRainbowText text={text} breakSingleNewlines />}
                     {hasAttachments && <MessageAttachments attachments={attachments} />}
                 </div>
                 {(hasText || status) && (

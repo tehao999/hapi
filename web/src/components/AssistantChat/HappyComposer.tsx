@@ -32,6 +32,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { getModelOptionsForFlavor, getNextModelForFlavor } from './modelOptions'
 import { getClaudeComposerEffortOptions } from './claudeEffortOptions'
 import { getCodexComposerReasoningEffortOptions } from './codexReasoningEffortOptions'
+import { shouldEnterInsertNewline } from './composerEnterBehavior'
 
 export interface TextInputState {
     text: string
@@ -303,8 +304,9 @@ export function HappyComposer(props: {
             return
         }
 
-        // Shift+Enter inserts a newline (standard behavior)
-        if (key === 'Enter' && e.shiftKey) {
+        // Shift+Enter inserts a newline on desktop; on touch devices bare Enter
+        // also inserts a newline (iOS soft keyboards cannot emit Shift+Enter).
+        if (key === 'Enter' && shouldEnterInsertNewline({ shiftKey: e.shiftKey, isTouch })) {
             return // let default textarea behavior handle newline
         }
 
@@ -378,7 +380,8 @@ export function HappyComposer(props: {
         permissionModes,
         canSend,
         api,
-        haptic
+        haptic,
+        isTouch
     ])
 
     useEffect(() => {
