@@ -13,6 +13,7 @@ import {
     setSessionModelReasoningEffort,
     setSessionTeamState,
     setSessionTodos,
+    touchSessionMessage,
     updateSessionAgentState,
     updateSessionMetadata
 } from './sessions'
@@ -53,6 +54,10 @@ export class SessionStore {
         namespace: string
     ): VersionedUpdateResult<unknown | null> {
         return updateSessionAgentState(this.db, id, agentState, expectedVersion, namespace)
+    }
+
+    touchSessionMessage(id: string, updatedAt: number, messageSeq: number, namespace: string): boolean {
+        return touchSessionMessage(this.db, id, updatedAt, messageSeq, namespace)
     }
 
     setSessionTodos(id: string, todos: unknown, todosUpdatedAt: number, namespace: string): boolean {

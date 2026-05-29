@@ -1,4 +1,11 @@
-import { CODEX_DESKTOP_SYNC_SOURCE, getExecutionControl, isObject } from '@hapi/protocol'
+import {
+    CODEX_DESKTOP_SYNC_SOURCE,
+    getExecutionControl,
+    isCodexDesktopSyncMessageEnvelope,
+    isNativeHapiRunnerSession,
+    isObject,
+    unwrapRoleWrappedRecordEnvelope
+} from '@hapi/protocol'
 import type { ClientToServerEvents, SyncMessageAck } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
@@ -16,6 +23,8 @@ import type { AccessErrorReason, AccessResult } from './types'
 type SessionAlivePayload = {
     sid: string
     time: number
+    source?: 'cli' | 'codex-desktop-sync'
+    generation?: number
     thinking?: boolean
     mode?: 'local' | 'remote'
     permissionMode?: PermissionMode
@@ -29,6 +38,7 @@ type SessionEndPayload = {
     sid: string
     time: number
     source?: 'cli' | 'codex-desktop-sync'
+    generation?: number
 }
 
 type ResolveSessionAccess = (sessionId: string) => AccessResult<StoredSession>
@@ -94,6 +104,81 @@ const updateStateSchema = z.object({
     agentState: z.unknown().nullable()
 })
 
+const PASSIVE_SYNC_DEDUPE_LOOKBACK_LIMIT = 200
+const PASSIVE_SYNC_AGENT_TEXT_DUPLICATE_WINDOW_MS = 30_000
+const PASSIVE_SYNC_READY_DUPLICATE_WINDOW_MS = 10_000
+const PASSIVE_SYNC_USER_TEXT_DUPLICATE_WINDOW_MS = 30_000
+
+type AgentTextMessage = {
+    message: string
+    phase: string | null
+}
+
+function normalizeAgentTextForDuplicateCheck(text: string): string {
+    return text
+        .replace(/\r\n/g, '\n')
+        .replace(/\n*<oai-mem-citation>[\s\S]*<\/oai-mem-citation>\s*$/, '')
+        .trimEnd()
+}
+
+function fieldRecord(value: unknown): Record<string, unknown> | null {
+    return isObject(value) && !Array.isArray(value) ? value : null
+}
+
+function parseAgentTextMessage(content: unknown): AgentTextMessage | null {
+    const wrapped = unwrapRoleWrappedRecordEnvelope(content)
+    if (!wrapped || wrapped.role !== 'agent') return null
+
+    const codexContent = fieldRecord(wrapped.content)
+    if (!codexContent || codexContent.type !== 'codex') return null
+
+    const data = fieldRecord(codexContent.data)
+    if (!data || data.type !== 'message' || typeof data.message !== 'string') return null
+
+    return {
+        message: normalizeAgentTextForDuplicateCheck(data.message),
+        phase: typeof data.phase === 'string' ? data.phase : null
+    }
+}
+
+function agentTextMessagesEquivalent(leftContent: unknown, rightContent: unknown): boolean {
+    const left = parseAgentTextMessage(leftContent)
+    const right = parseAgentTextMessage(rightContent)
+    if (!left || !right) return false
+    if (left.message !== right.message) return false
+    if (left.phase === right.phase) return true
+    return left.phase === null || right.phase === null
+}
+
+function parseUserText(content: unknown): string | null {
+    const wrapped = unwrapRoleWrappedRecordEnvelope(content)
+    if (!wrapped || wrapped.role !== 'user') return null
+
+    const textContent = fieldRecord(wrapped.content)
+    return typeof textContent?.text === 'string' ? textContent.text : null
+}
+
+function userTextsEquivalent(leftContent: unknown, rightContent: unknown): boolean {
+    const left = parseUserText(leftContent)
+    const right = parseUserText(rightContent)
+    return left !== null && left === right
+}
+
+function isReadyEvent(content: unknown): boolean {
+    const wrapped = unwrapRoleWrappedRecordEnvelope(content)
+    if (!wrapped || wrapped.role !== 'agent') return false
+
+    const eventContent = fieldRecord(wrapped.content)
+    if (!eventContent || eventContent.type !== 'event') return false
+
+    const data = fieldRecord(eventContent.data)
+    return data?.type === 'ready'
+}
+
+function isWithinWindow(createdAt: number, now: number, windowMs: number): boolean {
+    return Number.isFinite(createdAt) && Math.abs(now - createdAt) <= windowMs
+}
+
 export type SessionHandlersDeps = {
     store: Store
     resolveSessionAccess: ResolveSessionAccess
@@ -109,6 +194,40 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
 
     const rejectPassiveSync = (cb: SyncMessageAckCallback | undefined, reason: SyncMessageRejectReason) => {
         cb?.({ inserted: false, reason })
+    }
+
+    const isRecentPassiveSyncDuplicate = (sid: string, content: unknown): boolean => {
+        const now = Date.now()
+        const recentMessages = store.messages.getMessages(sid, PASSIVE_SYNC_DEDUPE_LOOKBACK_LIMIT)
+        return recentMessages.some((message) => {
+            if (isCodexDesktopSyncMessageEnvelope(message)) {
+                return false
+            }
+
+            if (
+                agentTextMessagesEquivalent(message.content, content)
+                && isWithinWindow(message.createdAt, now, PASSIVE_SYNC_AGENT_TEXT_DUPLICATE_WINDOW_MS)
+            ) {
+                return true
+            }
+
+            if (
+                isReadyEvent(message.content)
+                && isReadyEvent(content)
+                && isWithinWindow(message.createdAt, now, PASSIVE_SYNC_READY_DUPLICATE_WINDOW_MS)
+            ) {
+                return true
+            }
+
+            if (
+                userTextsEquivalent(message.content, content)
+                && isWithinWindow(message.createdAt, now, PASSIVE_SYNC_USER_TEXT_DUPLICATE_WINDOW_MS)
+            ) {
+                return true
+            }
+
+            return false
+        })
     }
 
     const handleMessage = (
@@ -140,14 +259,20 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
 
         if (options.passiveSync) {
             const control = getExecutionControl(session.metadata)
-            const verdict = shouldAcceptPassiveSync(control, parsed.data.generation, Date.now())
+            const shouldTrackDesktopOwnership = !isNativeHapiRunnerSession(session.metadata)
+            const verdict = shouldTrackDesktopOwnership
+                ? shouldAcceptPassiveSync(control, parsed.data.generation, Date.now())
+                : { accepted: true, nextControl: control }
             if (!verdict.accepted) {
                 rejectPassiveSync(cb, 'stale-generation')
                 return
             }
 
-            const needsMirrorSource = !isObject(session.metadata) || session.metadata.mirrorSource !== CODEX_DESKTOP_SYNC_SOURCE
-            const needsExecutionControl = verdict.nextControl !== null && verdict.nextControl !== control
+            const needsMirrorSource = shouldTrackDesktopOwnership
+                && (!isObject(session.metadata) || session.metadata.mirrorSource !== CODEX_DESKTOP_SYNC_SOURCE)
+            const needsExecutionControl = shouldTrackDesktopOwnership
+                && verdict.nextControl !== null
+                && verdict.nextControl !== control
 
             if (needsMirrorSource || needsExecutionControl) {
                 const metadata = {
@@ -182,7 +307,16 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             }
         }
 
+        if (options.passiveSync && isRecentPassiveSyncDuplicate(sid, content)) {
+            rejectPassiveSync(cb, 'duplicate')
+            return
+        }
+
         const msg = store.messages.addMessage(sid, content, localId)
+        const sessionTouched = store.sessions.touchSessionMessage(sid, msg.createdAt, msg.seq, session.namespace)
+        if (sessionTouched) {
+            onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { sid } })
+        }
 
         const todos = extractTodoWriteTodosFromMessageContent(content)
         if (todos) {
@@ -272,7 +406,8 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             sid,
             mergedMetadata,
             expectedVersion,
-            sessionAccess.value.namespace
+            sessionAccess.value.namespace,
+            { touchUpdatedAt: false }
         )
         if (result.result === 'success') {
             cb({ result: 'success', version: result.version, metadata: result.value })

@@ -1017,6 +1017,80 @@ describe('session model', () => {
         }
     })
 
+    it('takeoverSession treats recent desktop-sync messages as a desktop mirror even without metadata', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const engine = new SyncEngine(
+            store,
+            null as never,
+            new RpcRegistry(),
+            { broadcast: () => undefined } as never
+        )
+        ;(engine as unknown as { eventPublisher: EventPublisher }).eventPublisher = createPublisher(events)
+        const runner = engine.getOrCreateSession(
+            'runner-session-message-only',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                codexSessionId: 'thread-message-only'
+            },
+            null,
+            'default',
+            'gpt-5.4'
+        )
+        const rpcGateway = {
+            spawnSession: async () => ({ type: 'success' as const, sessionId: runner.id })
+        }
+        ;(engine as unknown as { rpcGateway: typeof rpcGateway }).rpcGateway = rpcGateway
+        const mirror = engine.getOrCreateSession(
+            'desktop-mirror-message-only',
+            {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                codexSessionId: 'thread-message-only'
+            },
+            null,
+            'default',
+            'gpt-5.4'
+        )
+        store.messages.addMessage(mirror.id, {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: 'mirrored from desktop'
+                }
+            },
+            meta: {
+                sentFrom: 'codex-desktop-sync'
+            }
+        })
+        engine.getOrCreateMachine('machine-1', { host: 'localhost' }, null, 'default')
+        engine.handleMachineAlive({ machineId: 'machine-1', time: Date.now() })
+        mirror.active = true
+        mirror.thinking = false
+        ;(engine as unknown as { waitForSessionActive: () => Promise<boolean> }).waitForSessionActive = async () => true
+
+        try {
+            const result = await engine.takeoverSession(mirror.id, 'default')
+            const canonical = engine.getSession(runner.id)
+            const control = getExecutionControl(canonical?.metadata)
+
+            expect(result).toEqual({ type: 'success', sessionId: runner.id })
+            expect(canonical?.metadata?.mirrorSource).toBe('codex-desktop-sync')
+            expect(control).toMatchObject({
+                owner: 'hapi-runner',
+                generation: 1,
+                runnerSessionId: runner.id
+            })
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('releases runner ownership on session end so desktop sync can resume', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

@@ -48,6 +48,28 @@ describe('isCodexDesktopMirrorSession', () => {
             ]
         })).toBe(false)
     })
+
+    it('returns false for native HAPI runner sessions even when passive Codex transcript messages are present', () => {
+        expect(isCodexDesktopMirrorSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                startedFromRunner: true,
+                startedBy: 'runner'
+            },
+            messages: [
+                {
+                    localId: 'codex:thread-1:12:abc123',
+                    content: {
+                        role: 'agent',
+                        content: { type: 'codex', data: { type: 'message', message: 'echo from codex transcript' } },
+                        meta: { sentFrom: 'codex-desktop-sync' }
+                    }
+                }
+            ]
+        })).toBe(false)
+    })
 })
 
 it('reads persisted execution control from metadata', () => {

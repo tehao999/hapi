@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { getExecutionControl, isCodexDesktopMirrorSession } from '@hapi/protocol'
+import { CODEX_DESKTOP_SYNC_SOURCE, getExecutionControl, isCodexDesktopMirrorSession } from '@hapi/protocol'
 import type { CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import type { Server } from 'socket.io'
 import type { Store } from '../store'
@@ -220,6 +220,8 @@ export class SyncEngine {
     handleSessionAlive(payload: {
         sid: string
         time: number
+        source?: 'cli' | 'codex-desktop-sync'
+        generation?: number
         thinking?: boolean
         mode?: 'local' | 'remote'
         permissionMode?: PermissionMode
@@ -228,13 +230,19 @@ export class SyncEngine {
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
     }): void {
+        if (payload.source === CODEX_DESKTOP_SYNC_SOURCE) {
+            return
+        }
         this.sessionCache.handleSessionAlive(payload)
     }
 
-    handleSessionEnd(payload: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync' }): void {
+    handleSessionEnd(payload: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync'; generation?: number }): void {
+        if (payload.source === CODEX_DESKTOP_SYNC_SOURCE) {
+            return
+        }
         const session = this.sessionCache.getSession(payload.sid)
         const control = getExecutionControl(session?.metadata)
-        if (payload.source !== 'codex-desktop-sync' && session?.metadata && control?.owner === 'hapi-runner') {
+        if (session?.metadata && control?.owner === 'hapi-runner') {
             void this.sessionCache.patchSessionMetadata(payload.sid, session.namespace, (current) => ({
                 ...current,
                 executionControl: releaseRunnerControl(getExecutionControl(current), payload.time)
@@ -461,7 +469,8 @@ export class SyncEngine {
         const session = access.session
         const metadata = session.metadata
         const sourceExecutionControl = getExecutionControl(metadata)
-        const isDesktopMirror = isCodexDesktopMirrorSession({ metadata, messages: null })
+        const recentMessages = this.getMessagesPage(access.sessionId, { limit: 50, beforeSeq: null }).messages
+        const isDesktopMirror = isCodexDesktopMirrorSession({ metadata, messages: recentMessages })
 
         if (!isDesktopMirror) {
             return session.active ? { type: 'success', sessionId: access.sessionId } : await this.resumeAccessibleSession(access, namespace)

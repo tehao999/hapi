@@ -179,6 +179,34 @@ export function updateSessionAgentState(
     })
 }
 
+export function touchSessionMessage(
+    db: Database,
+    id: string,
+    updatedAt: number,
+    messageSeq: number,
+    namespace: string
+): boolean {
+    try {
+        const result = db.prepare(`
+            UPDATE sessions
+            SET updated_at = CASE WHEN updated_at > @updated_at THEN updated_at ELSE @updated_at END,
+                seq = CASE WHEN seq > @message_seq THEN seq ELSE @message_seq END
+            WHERE id = @id
+              AND namespace = @namespace
+              AND (updated_at < @updated_at OR seq < @message_seq)
+        `).run({
+            id,
+            namespace,
+            updated_at: updatedAt,
+            message_seq: messageSeq
+        })
+
+        return result.changes === 1
+    } catch {
+        return false
+    }
+}
+
 export function setSessionTodos(
     db: Database,
     id: string,

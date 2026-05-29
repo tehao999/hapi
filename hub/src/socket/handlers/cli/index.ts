@@ -13,6 +13,8 @@ import { cleanupTerminalHandlers, registerTerminalHandlers } from './terminalHan
 type SessionAlivePayload = {
     sid: string
     time: number
+    source?: 'cli' | 'codex-desktop-sync'
+    generation?: number
     thinking?: boolean
     mode?: 'local' | 'remote'
     permissionMode?: PermissionMode
@@ -25,6 +27,8 @@ type SessionAlivePayload = {
 type SessionEndPayload = {
     sid: string
     time: number
+    source?: 'cli' | 'codex-desktop-sync'
+    generation?: number
 }
 
 type MachineAlivePayload = {

@@ -51,12 +51,27 @@ class FakeSocket {
 type CreateHarnessOptions = {
     metadataUpdateResult?: 'success' | 'version-mismatch' | 'error'
     sessionMetadata?: Record<string, unknown>
+    existingMessages?: Array<{
+        sessionId?: string
+        content: unknown
+        localId?: string | null
+        createdAt?: number
+        seq?: number
+    }>
 }
 
 function createHarness(options: CreateHarnessOptions = {}) {
-    const { metadataUpdateResult = 'success', sessionMetadata } = options
+    const { metadataUpdateResult = 'success', sessionMetadata, existingMessages = [] } = options
     const socket = new FakeSocket()
     const storedMessages: Array<{ sid: string; content: unknown; localId?: string }> = []
+    const allMessages = existingMessages.map((message, index) => ({
+        id: `existing-${index + 1}`,
+        sessionId: message.sessionId ?? 'session-1',
+        content: message.content,
+        localId: message.localId ?? null,
+        createdAt: message.createdAt ?? Date.now(),
+        seq: message.seq ?? index + 1
+    }))
     const webappEvents: WebappEvent[] = []
     const metadataUpdates: Array<{
         sid: string
@@ -65,7 +80,13 @@ function createHarness(options: CreateHarnessOptions = {}) {
         namespace: string
         options?: { touchUpdatedAt?: boolean }
     }> = []
-    let seq = 0
+    const messageTouches: Array<{
+        sid: string
+        updatedAt: number
+        messageSeq: number
+        namespace: string
+    }> = []
+    let seq = allMessages.reduce((max, message) => Math.max(max, message.seq), 0)
     const baseMetadata: Record<string, unknown> = {
         path: '/tmp/project',
         host: 'localhost',
@@ -75,20 +96,31 @@ function createHarness(options: CreateHarnessOptions = {}) {
         namespace: 'default',
         metadataVersion: 3,
         metadata: { ...baseMetadata, ...(sessionMetadata ?? {}) },
-        teamState: null
+        teamState: null,
+        seq: 0,
+        updatedAt: 1_710_000_000_000
     }
     const store = {
         messages: {
             addMessage(sid: string, content: unknown, localId?: string) {
                 seq += 1
                 storedMessages.push({ sid, content, localId })
-                return {
+                const message = {
                     id: `message-${seq}`,
+                    sessionId: sid,
                     seq,
                     createdAt: 1_710_000_000_000 + seq,
                     localId: localId ?? null,
                     content
                 }
+                allMessages.push(message)
+                return message
+            },
+            getMessages(sessionId: string, limit = 200) {
+                return allMessages
+                    .filter((message) => message.sessionId === sessionId)
+                    .sort((left, right) => left.seq - right.seq)
+                    .slice(-limit)
             }
         },
         sessions: {
@@ -121,6 +153,15 @@ function createHarness(options: CreateHarnessOptions = {}) {
                     value: metadata
                 }
             },
+            touchSessionMessage(sid: string, updatedAt: number, messageSeq: number, namespace: string) {
+                messageTouches.push({ sid, updatedAt, messageSeq, namespace })
+                if (session.updatedAt >= updatedAt && session.seq >= messageSeq) {
+                    return false
+                }
+                session.updatedAt = Math.max(session.updatedAt, updatedAt)
+                session.seq = Math.max(session.seq, messageSeq)
+                return true
+            },
             setSessionTodos() {
                 return null
             },
@@ -141,12 +182,12 @@ function createHarness(options: CreateHarnessOptions = {}) {
         }
     })
 
-    return { socket, storedMessages, webappEvents, metadataUpdates, session }
+    return { socket, storedMessages, webappEvents, metadataUpdates, messageTouches, session, allMessages }
 }
 
 describe('cli session handlers', () => {
     it('broadcasts normal remote-control messages to other CLI sockets', () => {
-        const { socket, storedMessages, webappEvents } = createHarness()
+        const { socket, storedMessages, webappEvents, messageTouches } = createHarness()
 
         socket.trigger('message', {
             sid: 'session-1',
@@ -158,15 +199,22 @@ describe('cli session handlers', () => {
         })
 
         expect(storedMessages).toHaveLength(1)
+        expect(messageTouches).toEqual([{
+            sid: 'session-1',
+            updatedAt: 1_710_000_000_001,
+            messageSeq: 1,
+            namespace: 'default'
+        }])
         expect(socket.roomEmits).toHaveLength(1)
         expect(socket.roomEmits[0]?.room).toBe('session:session-1')
         expect(socket.roomEmits[0]?.event).toBe('update')
-        expect(webappEvents).toHaveLength(1)
-        expect(webappEvents[0]?.type).toBe('message-received')
+        expect(webappEvents).toHaveLength(2)
+        expect(webappEvents[0]?.type).toBe('session-updated')
+        expect(webappEvents[1]?.type).toBe('message-received')
     })
 
     it('stores passive sync messages for web without broadcasting them to CLI executors', () => {
-        const { socket, storedMessages, webappEvents, metadataUpdates } = createHarness()
+        const { socket, storedMessages, webappEvents, metadataUpdates, messageTouches } = createHarness()
         let ack: unknown = null
 
         socket.trigger('sync-message', {
@@ -181,6 +229,12 @@ describe('cli session handlers', () => {
         })
 
         expect(storedMessages).toHaveLength(1)
+        expect(messageTouches).toEqual([{
+            sid: 'session-1',
+            updatedAt: 1_710_000_000_001,
+            messageSeq: 1,
+            namespace: 'default'
+        }])
         expect(ack).toEqual({ inserted: true })
         expect(storedMessages[0]?.content).toEqual({
             role: 'user',
@@ -190,11 +244,13 @@ describe('cli session handlers', () => {
         expect(socket.roomEmits).toHaveLength(1)
         expect(socket.roomEmits[0]?.room).toBe('session:session-1')
         expect(socket.roomEmits[0]?.event).toBe('update')
-        expect(webappEvents).toHaveLength(2)
+        expect(webappEvents).toHaveLength(3)
         expect(webappEvents[0]?.type).toBe('session-updated')
         expect(webappEvents[0]?.sessionId).toBe('session-1')
-        expect(webappEvents[1]?.type).toBe('message-received')
+        expect(webappEvents[1]?.type).toBe('session-updated')
         expect(webappEvents[1]?.sessionId).toBe('session-1')
+        expect(webappEvents[2]?.type).toBe('message-received')
+        expect(webappEvents[2]?.sessionId).toBe('session-1')
         expect(metadataUpdates).toHaveLength(1)
         expect(metadataUpdates[0]).toMatchObject({
             sid: 'session-1',
@@ -215,6 +271,159 @@ describe('cli session handlers', () => {
             options: { touchUpdatedAt: false }
         })
         expect(typeof (metadataUpdates[0]?.metadata as { executionControl?: { updatedAt?: unknown } }).executionControl?.updatedAt).toBe('number')
+    })
+
+    it('does not stamp native HAPI runner sessions as desktop mirrors during passive transcript sync', () => {
+        const { socket, storedMessages, webappEvents, metadataUpdates, messageTouches } = createHarness({
+            sessionMetadata: {
+                startedFromRunner: true,
+                startedBy: 'runner'
+            }
+        })
+        let ack: unknown = null
+
+        socket.trigger('sync-message', {
+            sid: 'session-1',
+            source: 'codex-desktop-sync',
+            generation: 1,
+            localId: 'codex:thread-1:13:hapi-runner-echo',
+            message: {
+                role: 'agent',
+                content: { type: 'codex', data: { type: 'message', message: 'echo from the Codex transcript' } }
+            }
+        }, (value: unknown) => {
+            ack = value
+        })
+
+        expect(ack).toEqual({ inserted: true })
+        expect(storedMessages).toHaveLength(1)
+        expect(messageTouches).toEqual([{
+            sid: 'session-1',
+            updatedAt: 1_710_000_000_001,
+            messageSeq: 1,
+            namespace: 'default'
+        }])
+        expect(metadataUpdates).toHaveLength(0)
+        expect(webappEvents).toEqual([
+            expect.objectContaining({
+                type: 'session-updated',
+                sessionId: 'session-1'
+            }),
+            expect.objectContaining({
+                type: 'message-received',
+                sessionId: 'session-1'
+            })
+        ])
+    })
+
+    it('skips passive desktop assistant replays when an equivalent HAPI runner message already exists', () => {
+        const { socket, storedMessages, webappEvents, metadataUpdates, messageTouches } = createHarness({
+            sessionMetadata: {
+                startedFromRunner: true,
+                startedBy: 'runner'
+            },
+            existingMessages: [{
+                content: {
+                    role: 'agent',
+                    content: {
+                        type: 'codex',
+                        data: {
+                            type: 'message',
+                            message: 'same assistant reply from HAPI runner'
+                        }
+                    },
+                    meta: { sentFrom: 'cli' }
+                },
+                createdAt: Date.now() - 500,
+                seq: 1
+            }]
+        })
+        let ack: unknown = null
+
+        socket.trigger('sync-message', {
+            sid: 'session-1',
+            source: 'codex-desktop-sync',
+            generation: 1,
+            localId: 'codex:thread-1:14:duplicate-replay',
+            message: {
+                role: 'agent',
+                content: {
+                    type: 'codex',
+                    data: {
+                        type: 'message',
+                        message: 'same assistant reply from HAPI runner',
+                        phase: 'final_answer'
+                    }
+                }
+            }
+        }, (value: unknown) => {
+            ack = value
+        })
+
+        expect(ack).toEqual({ inserted: false, reason: 'duplicate' })
+        expect(storedMessages).toHaveLength(0)
+        expect(messageTouches).toHaveLength(0)
+        expect(metadataUpdates).toHaveLength(0)
+        expect(socket.roomEmits).toHaveLength(0)
+        expect(webappEvents).toHaveLength(0)
+    })
+
+    it('skips passive desktop assistant replays that only append a memory citation block', () => {
+        const hapiRunnerText = [
+            '已开始按 `superpowers:brainstorming` 做设计，不写代码、不改 live 配置。',
+            '',
+            '推荐选：**是**。这样最利于版本隔离、回滚和未来 OpenClaw 升级稳定。'
+        ].join('\n')
+        const desktopReplayText = `${hapiRunnerText}\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:937-943|note=[OpenClaw voice provider history]\n</citation_entries>\n<rollout_ids>\n019d9fe2-c00a-7dd0-8681-8dd3583d2071\n</rollout_ids>\n</oai-mem-citation>`
+        const { socket, storedMessages, webappEvents, metadataUpdates, messageTouches } = createHarness({
+            sessionMetadata: {
+                startedFromRunner: true,
+                startedBy: 'runner'
+            },
+            existingMessages: [{
+                content: {
+                    role: 'agent',
+                    content: {
+                        type: 'codex',
+                        data: {
+                            type: 'message',
+                            message: hapiRunnerText
+                        }
+                    },
+                    meta: { sentFrom: 'cli' }
+                },
+                createdAt: Date.now() - 500,
+                seq: 1
+            }]
+        })
+        let ack: unknown = null
+
+        socket.trigger('sync-message', {
+            sid: 'session-1',
+            source: 'codex-desktop-sync',
+            generation: 1,
+            localId: 'codex:thread-1:15:memory-citation-replay',
+            message: {
+                role: 'agent',
+                content: {
+                    type: 'codex',
+                    data: {
+                        type: 'message',
+                        message: desktopReplayText,
+                        phase: 'final_answer'
+                    }
+                }
+            }
+        }, (value: unknown) => {
+            ack = value
+        })
+
+        expect(ack).toEqual({ inserted: false, reason: 'duplicate' })
+        expect(storedMessages).toHaveLength(0)
+        expect(messageTouches).toHaveLength(0)
+        expect(metadataUpdates).toHaveLength(0)
+        expect(socket.roomEmits).toHaveLength(0)
+        expect(webappEvents).toHaveLength(0)
     })
 
     it('rejects passive sync writes with stale generation before storing or broadcasting', () => {
@@ -327,7 +536,8 @@ describe('cli session handlers', () => {
                     text: 'runner metadata update',
                     updatedAt: updatedAt + 1
                 }
-            }
+            },
+            options: { touchUpdatedAt: false }
         })
         expect(ack).toMatchObject({
             result: 'success',
@@ -344,7 +554,7 @@ describe('cli session handlers', () => {
     })
 
     it('stores passive sync writes during hapi-runner ownership when generation matches', () => {
-        const { socket, storedMessages, metadataUpdates, webappEvents, session } = createHarness()
+        const { socket, storedMessages, metadataUpdates, webappEvents, session, messageTouches } = createHarness()
         let ack: unknown = null
 
         session.metadata = {
@@ -375,8 +585,18 @@ describe('cli session handlers', () => {
 
         expect(ack).toEqual({ inserted: true })
         expect(storedMessages).toHaveLength(1)
+        expect(messageTouches).toEqual([{
+            sid: 'session-1',
+            updatedAt: 1_710_000_000_001,
+            messageSeq: 1,
+            namespace: 'default'
+        }])
         expect(metadataUpdates).toHaveLength(0)
         expect(webappEvents).toEqual([
+            expect.objectContaining({
+                type: 'session-updated',
+                sessionId: 'session-1'
+            }),
             expect.objectContaining({
                 type: 'message-received',
                 sessionId: 'session-1'

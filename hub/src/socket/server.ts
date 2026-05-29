@@ -36,8 +36,8 @@ export type SocketServerDeps = {
     corsOrigins?: string[]
     getSession?: (sessionId: string) => { active: boolean; namespace: string } | null
     onWebappEvent?: (event: SyncEvent) => void
-    onSessionAlive?: (payload: { sid: string; time: number; thinking?: boolean; mode?: 'local' | 'remote' }) => void
-    onSessionEnd?: (payload: { sid: string; time: number }) => void
+    onSessionAlive?: (payload: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync'; generation?: number; thinking?: boolean; mode?: 'local' | 'remote' }) => void
+    onSessionEnd?: (payload: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync'; generation?: number }) => void
     onMachineAlive?: (payload: { machineId: string; time: number }) => void
     onBackgroundTaskDelta?: (sessionId: string, delta: { started: number; completed: number }) => void
 }

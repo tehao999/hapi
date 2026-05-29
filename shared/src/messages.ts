@@ -71,6 +71,16 @@ export function isCodexDesktopSyncMessageEnvelope(message: {
     return meta?.sentFrom === CODEX_DESKTOP_SYNC_SOURCE
 }
 
+export function isNativeHapiRunnerSession(metadata: unknown | null | undefined): boolean {
+    if (!isObject(metadata)) {
+        return false
+    }
+    if (metadata.mirrorSource === CODEX_DESKTOP_SYNC_SOURCE) {
+        return false
+    }
+    return metadata.startedFromRunner === true || metadata.startedBy === 'runner'
+}
+
 export function isCodexDesktopMirrorSession(args: {
     metadata?: unknown | null
     messages?: Array<{
@@ -80,6 +90,9 @@ export function isCodexDesktopMirrorSession(args: {
 }): boolean {
     if (isObject(args.metadata) && args.metadata.mirrorSource === CODEX_DESKTOP_SYNC_SOURCE) {
         return true
+    }
+    if (isNativeHapiRunnerSession(args.metadata)) {
+        return false
     }
 
     for (const message of args.messages ?? []) {

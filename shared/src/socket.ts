@@ -135,7 +135,7 @@ export type SyncMessageAck = {
     inserted: true
 } | {
     inserted: false
-    reason: 'stale-generation' | 'metadata-conflict'
+    reason: 'stale-generation' | 'metadata-conflict' | 'duplicate'
 }
 
 export interface ClientToServerEvents {
@@ -147,7 +147,7 @@ export interface ClientToServerEvents {
     'session-alive': (data: {
         sid: string
         time: number
-        thinking: boolean
+        thinking?: boolean
         mode?: 'local' | 'remote'
         source?: 'cli' | 'codex-desktop-sync'
         generation?: number
@@ -157,7 +157,7 @@ export interface ClientToServerEvents {
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
     }) => void
-    'session-end': (data: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync' }) => void
+    'session-end': (data: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync'; generation?: number }) => void
     'update-metadata': (data: { sid: string; expectedVersion: number; metadata: unknown }, cb: (answer: {
         result: 'error'
         reason?: SocketErrorReason
