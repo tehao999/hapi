@@ -267,10 +267,16 @@ function getTodoProgress(session: SessionSummary): { completed: number; total: n
     return session.todoProgress
 }
 
-const FLAVOR_BADGES: Record<string, { label: string; colors: string }> = {
+type FlavorBadge = { label: string; colors: string }
+
+const FLAVOR_BADGES: Record<string, FlavorBadge> = {
     claude: {
         label: 'Cl',
         colors: 'bg-[#d97706] text-white',
+    },
+    'claude-deepseek': {
+        label: 'DS',
+        colors: 'bg-[#0f4c81] text-white',
     },
     codex: {
         label: 'Cx',
@@ -290,8 +296,12 @@ const FLAVOR_BADGES: Record<string, { label: string; colors: string }> = {
     },
 }
 
+export function getFlavorBadge(flavor?: string | null): FlavorBadge {
+    return FLAVOR_BADGES[(flavor ?? 'claude').trim().toLowerCase()] ?? FLAVOR_BADGES.claude
+}
+
 function FlavorIcon({ flavor, className }: { flavor?: string | null; className?: string }) {
-    const badge = FLAVOR_BADGES[(flavor ?? 'claude').trim().toLowerCase()] ?? FLAVOR_BADGES.claude
+    const badge = getFlavorBadge(flavor)
     return (
         <span
             aria-hidden="true"

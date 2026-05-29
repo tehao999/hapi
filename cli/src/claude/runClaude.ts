@@ -30,6 +30,7 @@ export interface StartOptions {
     claudeEnvVars?: Record<string, string>
     claudeArgs?: string[]
     startedBy?: 'runner' | 'terminal'
+    agentFlavor?: 'claude' | 'claude-deepseek'
 }
 
 export async function runClaude(options: StartOptions = {}): Promise<void> {
@@ -52,7 +53,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
     const initialModel = normalizeClaudeSessionModel(options.model);
     const initialEffort = normalizeClaudeSessionEffort(options.effort);
     const { api, session, sessionInfo } = await bootstrapSession({
-        flavor: 'claude',
+        flavor: options.agentFlavor ?? 'claude',
         startedBy,
         workingDirectory,
         agentState: initialState,

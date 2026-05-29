@@ -433,7 +433,7 @@ export class SyncEngine {
     async spawnSession(
         machineId: string,
         directory: string,
-        agent: 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' = 'claude',
+        agent: 'claude' | 'claude-deepseek' | 'codex' | 'cursor' | 'gemini' | 'opencode' = 'claude',
         model?: string,
         modelReasoningEffort?: string,
         yolo?: boolean,
@@ -565,7 +565,7 @@ export class SyncEngine {
             return { type: 'error', message: 'Session metadata missing path', code: 'resume_unavailable' }
         }
 
-        const flavor = metadata.flavor === 'codex' || metadata.flavor === 'gemini' || metadata.flavor === 'opencode' || metadata.flavor === 'cursor'
+        const flavor = metadata.flavor === 'codex' || metadata.flavor === 'gemini' || metadata.flavor === 'opencode' || metadata.flavor === 'cursor' || metadata.flavor === 'claude-deepseek'
             ? metadata.flavor
             : 'claude'
         const resumeToken = flavor === 'codex'

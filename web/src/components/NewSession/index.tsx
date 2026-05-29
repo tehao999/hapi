@@ -66,7 +66,7 @@ export function NewSession(props: {
 
     useEffect(() => {
         setModel('auto')
-        setEffort('auto')
+        setEffort(agent === 'claude-deepseek' ? 'max' : 'auto')
     }, [agent])
 
     useEffect(() => {
@@ -248,8 +248,12 @@ export function NewSession(props: {
                 return
             }
 
-            const resolvedModel = model !== 'auto' && agent !== 'opencode' ? model : undefined
-            const resolvedEffort = agent === 'claude' && effort !== 'auto' ? effort : undefined
+            const resolvedModel = model !== 'auto' && agent !== 'opencode' && agent !== 'claude-deepseek' ? model : undefined
+            const resolvedEffort = agent === 'claude-deepseek'
+                ? 'max'
+                : agent === 'claude' && effort !== 'auto'
+                    ? effort
+                    : undefined
             const resolvedModelReasoningEffort = agent === 'codex' && modelReasoningEffort !== 'default'
                 ? modelReasoningEffort
                 : undefined

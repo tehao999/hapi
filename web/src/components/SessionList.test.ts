@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
 import { CODEX_DESKTOP_SYNC_SOURCE, getSessionDisplayTitle, toSessionSummary } from '@hapi/protocol'
-import { deduplicateSessionsByAgentId } from './SessionList'
+import { deduplicateSessionsByAgentId, getFlavorBadge } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -80,6 +80,13 @@ describe('deduplicateSessionsByAgentId', () => {
         const result = deduplicateSessionsByAgentId(sessions)
         expect(result).toHaveLength(2)
         expect(result.map(s => s.id).sort()).toEqual(['b', 'd'])
+    })
+})
+
+describe('flavor badges', () => {
+    it('shows DeepSeek-specific initials for CC-deepseek sessions', () => {
+        expect(getFlavorBadge('claude-deepseek').label).toBe('DS')
+        expect(getFlavorBadge('claude').label).toBe('Cl')
     })
 })
 

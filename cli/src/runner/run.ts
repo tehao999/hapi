@@ -24,6 +24,34 @@ import { join } from 'path';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { hashRunnerCliApiToken } from './runnerIdentity';
 
+const CLAUDE_DEEPSEEK_AGENT = 'claude-deepseek';
+
+function getUserHome(env: NodeJS.ProcessEnv = process.env): string {
+  return env.HOME?.trim() || os.homedir();
+}
+
+export function getClaudeDeepSeekWrapperPath(env: NodeJS.ProcessEnv = process.env): string {
+  return env.HAPI_CLAUDE_DEEPSEEK_PATH?.trim() || join(getUserHome(env), '.local', 'bin', 'claude-deepseek');
+}
+
+export function isClaudeDeepSeekAgent(agent: string | undefined): boolean {
+  return agent === CLAUDE_DEEPSEEK_AGENT;
+}
+
+export function isClaudeFamilyAgent(agent: string | undefined): boolean {
+  return agent === 'claude' || isClaudeDeepSeekAgent(agent);
+}
+
+export function getRunnerAgentEnv(agent: string | undefined, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if (isClaudeDeepSeekAgent(agent)) {
+    return {
+      HAPI_CLAUDE_PATH: getClaudeDeepSeekWrapperPath(env)
+    };
+  }
+
+  return {};
+}
+
 export async function startRunner(): Promise<void> {
   // We don't have cleanup function at the time of server construction
   // Control flow is:
@@ -308,9 +336,9 @@ export async function startRunner(): Promise<void> {
       try {
 
         // Resolve authentication token if provided
-        let extraEnv: Record<string, string> = {};
+        let extraEnv: Record<string, string> = getRunnerAgentEnv(agent);
         if (options.token) {
-          if (options.agent === 'codex') {
+          if (agent === 'codex') {
 
             // Create a temporary directory for Codex
             const codexHomeDir = await fs.mkdtemp(join(os.tmpdir(), 'hapi-codex-'));
@@ -322,7 +350,7 @@ export async function startRunner(): Promise<void> {
             extraEnv = {
               CODEX_HOME: codexHomeDir
             };
-          } else if (options.agent === 'claude' || !options.agent) {
+          } else if (agent === 'claude') {
             extraEnv = {
               CLAUDE_CODE_OAUTH_TOKEN: options.token
             };
@@ -848,11 +876,15 @@ export function buildCliArgs(
     }
   }
   args.push('--hapi-starting-mode', 'remote', '--started-by', 'runner');
-  if (options.model && agent !== 'opencode') {
+  if (isClaudeDeepSeekAgent(agent)) {
+    args.push('--hapi-agent', CLAUDE_DEEPSEEK_AGENT);
+  }
+  if (options.model && agent !== 'opencode' && !isClaudeDeepSeekAgent(agent)) {
     args.push('--model', options.model);
   }
-  if (options.effort && agent === 'claude') {
-    args.push('--effort', options.effort);
+  const effectiveEffort = isClaudeDeepSeekAgent(agent) ? 'max' : options.effort;
+  if (effectiveEffort && isClaudeFamilyAgent(agent)) {
+    args.push('--effort', effectiveEffort);
   }
   if (options.modelReasoningEffort && agent === 'codex') {
     args.push('--model-reasoning-effort', options.modelReasoningEffort);

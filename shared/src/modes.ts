@@ -35,7 +35,7 @@ export const PERMISSION_MODES = [
 ] as const
 export type PermissionMode = typeof PERMISSION_MODES[number]
 
-export type AgentFlavor = 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor'
+export type AgentFlavor = 'claude' | 'claude-deepseek' | 'codex' | 'gemini' | 'opencode' | 'cursor'
 
 export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
     default: 'Default',

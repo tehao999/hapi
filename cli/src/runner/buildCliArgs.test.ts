@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCliArgs } from './run'
+import { buildCliArgs, getRunnerAgentEnv } from './run'
 
 describe('buildCliArgs', () => {
     it('adds --permission-mode for valid permission mode', () => {
@@ -60,5 +60,33 @@ describe('buildCliArgs', () => {
             expect(args).toContain('--permission-mode')
             expect(args).toContain(mode)
         }
+    })
+
+    it('routes claude-deepseek through Claude while omitting model overrides and forcing max effort', () => {
+        const args = buildCliArgs('claude-deepseek', {
+            directory: '/tmp',
+            model: 'sonnet',
+            effort: 'medium',
+        })
+
+        expect(args[0]).toBe('claude')
+        expect(args).toContain('--hapi-agent')
+        expect(args).toContain('claude-deepseek')
+        expect(args).not.toContain('--model')
+        expect(args).not.toContain('sonnet')
+        expect(args).toContain('--effort')
+        expect(args).toContain('max')
+        expect(args).not.toContain('medium')
+    })
+
+    it('injects the claude-deepseek wrapper path without touching other agent environments', () => {
+        expect(getRunnerAgentEnv('claude-deepseek', { HOME: '/Users/example' })).toEqual({
+            HAPI_CLAUDE_PATH: '/Users/example/.local/bin/claude-deepseek',
+        })
+        expect(getRunnerAgentEnv('claude-deepseek', { HAPI_CLAUDE_DEEPSEEK_PATH: '/custom/cc-ds' })).toEqual({
+            HAPI_CLAUDE_PATH: '/custom/cc-ds',
+        })
+        expect(getRunnerAgentEnv('claude', { HOME: '/Users/example' })).toEqual({})
+        expect(getRunnerAgentEnv('codex', { HOME: '/Users/example' })).toEqual({})
     })
 })

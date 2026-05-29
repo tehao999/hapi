@@ -17,6 +17,11 @@ describe('hasCapability', () => {
         expect(hasCapability('claude', Capabilities.Effort)).toBe(true)
     })
 
+    test('claude-deepseek supports effort but not model-change', () => {
+        expect(hasCapability('claude-deepseek', Capabilities.ModelChange)).toBe(false)
+        expect(hasCapability('claude-deepseek', Capabilities.Effort)).toBe(true)
+    })
+
     test('gemini supports model-change but not effort', () => {
         expect(hasCapability('gemini', Capabilities.ModelChange)).toBe(true)
         expect(hasCapability('gemini', Capabilities.Effort)).toBe(false)
@@ -50,6 +55,7 @@ describe('hasCapability', () => {
 describe('getFlavorLabel', () => {
     test('known flavors return display names', () => {
         expect(getFlavorLabel('claude')).toBe('Claude')
+        expect(getFlavorLabel('claude-deepseek')).toBe('CC-deepseek')
         expect(getFlavorLabel('gemini')).toBe('Gemini')
         expect(getFlavorLabel('codex')).toBe('Codex')
         expect(getFlavorLabel('cursor')).toBe('Cursor')
@@ -69,6 +75,7 @@ describe('getFlavorLabel', () => {
 describe('isKnownFlavor', () => {
     test('returns true for registered flavors', () => {
         expect(isKnownFlavor('claude')).toBe(true)
+        expect(isKnownFlavor('claude-deepseek')).toBe(true)
         expect(isKnownFlavor('gemini')).toBe(true)
         expect(isKnownFlavor('codex')).toBe(true)
         expect(isKnownFlavor('cursor')).toBe(true)
@@ -85,6 +92,7 @@ describe('isKnownFlavor', () => {
 describe('convenience functions', () => {
     test('supportsModelChange matches hasCapability', () => {
         expect(supportsModelChange('claude')).toBe(true)
+        expect(supportsModelChange('claude-deepseek')).toBe(false)
         expect(supportsModelChange('gemini')).toBe(true)
         expect(supportsModelChange('cursor')).toBe(false)
         expect(supportsModelChange(null)).toBe(false)
@@ -92,6 +100,7 @@ describe('convenience functions', () => {
 
     test('supportsEffort matches hasCapability', () => {
         expect(supportsEffort('claude')).toBe(true)
+        expect(supportsEffort('claude-deepseek')).toBe(true)
         expect(supportsEffort('codex')).toBe(false)
         expect(supportsEffort('gemini')).toBe(false)
         expect(supportsEffort(null)).toBe(false)

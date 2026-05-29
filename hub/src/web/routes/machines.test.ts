@@ -34,8 +34,10 @@ function createMachine(overrides?: Partial<Machine>): Machine {
 
 function createApp(machines: Machine[]) {
     const engine = {
+        getMachine: (machineId: string) => machines.find((machine) => machine.id === machineId),
         getMachinesByNamespace: (namespace: string) => machines.filter((machine) => machine.namespace === namespace),
-        getOnlineMachinesByNamespace: (namespace: string) => machines.filter((machine) => machine.namespace === namespace && machine.active)
+        getOnlineMachinesByNamespace: (namespace: string) => machines.filter((machine) => machine.namespace === namespace && machine.active),
+        spawnSession: async () => ({ type: 'success' as const, sessionId: 'session-1' })
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
@@ -64,5 +66,43 @@ describe('machines routes', () => {
             knownMachinesCount: 2,
             offlineMachinesCount: 1
         })
+    })
+
+    it('accepts CC-deepseek as a spawn agent', async () => {
+        let capturedAgent: string | undefined
+        const machines = [createMachine({ id: 'machine-1', active: true })]
+        const engine = {
+            getMachine: (machineId: string) => machines.find((machine) => machine.id === machineId),
+            getMachinesByNamespace: (namespace: string) => machines.filter((machine) => machine.namespace === namespace),
+            getOnlineMachinesByNamespace: (namespace: string) => machines.filter((machine) => machine.namespace === namespace && machine.active),
+            spawnSession: async (
+                _machineId: string,
+                _directory: string,
+                agent?: string
+            ) => {
+                capturedAgent = agent
+                return { type: 'success' as const, sessionId: 'session-cc-deepseek' }
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/spawn', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                directory: '/tmp/project',
+                agent: 'claude-deepseek'
+            })
+        })
+
+        expect(response.status).toBe(200)
+        expect(capturedAgent).toBe('claude-deepseek')
+        expect(await response.json()).toEqual({ type: 'success', sessionId: 'session-cc-deepseek' })
     })
 })

@@ -1,6 +1,6 @@
 import { GEMINI_MODEL_PRESETS, GEMINI_MODEL_LABELS } from '@hapi/protocol'
 
-export type AgentType = 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode'
+export type AgentType = 'claude' | 'claude-deepseek' | 'codex' | 'cursor' | 'gemini' | 'opencode'
 export type SessionType = 'simple' | 'worktree'
 export type CodexReasoningEffort = 'default' | 'low' | 'medium' | 'high' | 'xhigh'
 export type ClaudeEffort = 'auto' | 'medium' | 'high' | 'max'
@@ -13,6 +13,7 @@ export const MODEL_OPTIONS: Record<AgentType, { value: string; label: string }[]
         { value: 'sonnet', label: 'Sonnet' },
         { value: 'sonnet[1m]', label: 'Sonnet 1M' },
     ],
+    'claude-deepseek': [],
     codex: [
         { value: 'auto', label: 'Auto' },
         { value: 'gpt-5.4', label: 'GPT-5.4' },

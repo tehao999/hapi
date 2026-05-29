@@ -67,6 +67,8 @@ export const claudeCommand: CommandDefinition = {
                 unknownArgs.push('--effort', effort)
             } else if (arg === '--started-by') {
                 options.startedBy = args[++i] as 'runner' | 'terminal'
+            } else if (arg === '--hapi-agent') {
+                options.agentFlavor = z.enum(['claude', 'claude-deepseek']).parse(args[++i])
             } else {
                 unknownArgs.push(arg)
                 if (i + 1 < args.length && !args[i + 1].startsWith('-')) {

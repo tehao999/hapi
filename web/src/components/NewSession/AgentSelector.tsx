@@ -1,6 +1,15 @@
 import type { AgentType } from './types'
 import { useTranslation } from '@/lib/use-translation'
 
+const AGENT_OPTIONS: { value: AgentType; label: string }[] = [
+    { value: 'claude', label: 'Claude' },
+    { value: 'claude-deepseek', label: 'CC-deepseek' },
+    { value: 'codex', label: 'Codex' },
+    { value: 'cursor', label: 'Cursor' },
+    { value: 'gemini', label: 'Gemini' },
+    { value: 'opencode', label: 'Opencode' },
+]
+
 export function AgentSelector(props: {
     agent: AgentType
     isDisabled: boolean
@@ -14,21 +23,21 @@ export function AgentSelector(props: {
                 {t('newSession.agent')}
             </label>
             <div className="flex flex-wrap gap-x-3 gap-y-2">
-                {(['claude', 'codex', 'cursor', 'gemini', 'opencode'] as const).map((agentType) => (
+                {AGENT_OPTIONS.map((option) => (
                     <label
-                        key={agentType}
+                        key={option.value}
                         className="flex items-center gap-1.5 cursor-pointer"
                     >
                         <input
                             type="radio"
                             name="agent"
-                            value={agentType}
-                            checked={props.agent === agentType}
-                            onChange={() => props.onAgentChange(agentType)}
+                            value={option.value}
+                            checked={props.agent === option.value}
+                            onChange={() => props.onAgentChange(option.value)}
                             disabled={props.isDisabled}
                             className="accent-[var(--app-link)]"
                         />
-                        <span className="text-sm capitalize">{agentType}</span>
+                        <span className="text-sm">{option.label}</span>
                     </label>
                 ))}
             </div>
