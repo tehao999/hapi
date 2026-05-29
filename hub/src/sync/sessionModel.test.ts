@@ -54,6 +54,67 @@ describe('session model', () => {
         }
     })
 
+    it('archives a session even when the killSession RPC handler is already gone', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            null as never,
+            new RpcRegistry(),
+            { broadcast: () => undefined } as never
+        )
+        ;(engine as unknown as { rpcGateway: { killSession: (sessionId: string) => Promise<void> } }).rpcGateway = {
+            killSession: async (sessionId: string) => {
+                throw new Error(`RPC handler not registered: ${sessionId}:killSession`)
+            }
+        }
+
+        const session = engine.getOrCreateSession(
+            'archive-dead-rpc',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+
+        try {
+            engine.handleSessionAlive({ sid: session.id, time: Date.now(), thinking: true })
+            await engine.archiveSession(session.id)
+            expect(engine.getSession(session.id)?.active).toBe(false)
+            expect(engine.getSession(session.id)?.thinking).toBe(false)
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('does not mask unexpected archive killSession errors', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            null as never,
+            new RpcRegistry(),
+            { broadcast: () => undefined } as never
+        )
+        ;(engine as unknown as { rpcGateway: { killSession: (sessionId: string) => Promise<void> } }).rpcGateway = {
+            killSession: async () => {
+                throw new Error('permission denied')
+            }
+        }
+
+        const session = engine.getOrCreateSession(
+            'archive-real-error',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+
+        try {
+            engine.handleSessionAlive({ sid: session.id, time: Date.now(), thinking: true })
+            await expect(engine.archiveSession(session.id)).rejects.toThrow('permission denied')
+            expect(engine.getSession(session.id)?.active).toBe(true)
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('includes explicit model in session summaries', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

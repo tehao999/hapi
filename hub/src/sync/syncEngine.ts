@@ -48,6 +48,14 @@ type TakeoverSessionResult =
     | { type: 'success'; sessionId: string }
     | { type: 'error'; message: string; code: 'access_denied' | 'session_not_found' | 'resume_unavailable' | 'resume_failed' | 'no_machine_online' | 'takeover_busy' }
 
+export function isIgnorableKillSessionError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false
+    }
+    return error.message.startsWith('RPC handler not registered:')
+        || error.message.startsWith('RPC socket disconnected:')
+}
+
 export class SyncEngine {
     private readonly eventPublisher: EventPublisher
     private readonly sessionCache: SessionCache
@@ -368,7 +376,14 @@ export class SyncEngine {
     }
 
     async archiveSession(sessionId: string): Promise<void> {
-        await this.rpcGateway.killSession(sessionId)
+        try {
+            await this.rpcGateway.killSession(sessionId)
+        } catch (error) {
+            if (!isIgnorableKillSessionError(error)) {
+                throw error
+            }
+            console.warn(`Archive continuing after stale killSession RPC for ${sessionId}: ${(error as Error).message}`)
+        }
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
     }
 
