@@ -64,7 +64,12 @@ test('socket sink marks mirrored session alive around passive sync messages', as
     message: { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'hi' } } }
   });
   assert.equal(emitted[3].event, 'session-end');
-  assert.equal(emitted[3].payload.sid, 'session-1');
+  assert.deepEqual(emitted[3].payload, {
+    sid: 'session-1',
+    time: emitted[3].payload.time,
+    source: 'codex-desktop-sync',
+    generation: 7
+  });
   assert.equal(typeof emitted[3].payload.time, 'number');
   assert.equal(fakeSocket.disconnected, true);
 });

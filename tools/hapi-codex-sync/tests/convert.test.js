@@ -57,6 +57,25 @@ test('converts function calls and function outputs into HAPI codex tool messages
   assert.deepEqual(output.content.data, { type: 'tool-call-result', callId: 'call_1', output: 'ok' });
 });
 
+test('summarizes oversized function call outputs during passive sync', () => {
+  const output = convertCodexEvent({
+    timestamp: '2026-04-18T05:15:02.000Z',
+    type: 'response_item',
+    payload: {
+      type: 'function_call_output',
+      call_id: 'call_big',
+      output: `head\n${'x'.repeat(5000)}\ntail`
+    }
+  }, { maxToolOutputChars: 80 });
+
+  assert.equal(output.content.data.type, 'tool-call-result');
+  assert.equal(output.content.data.callId, 'call_big');
+  assert.equal(output.content.data.output.type, 'hapi-tool-output-summary');
+  assert.equal(output.content.data.output.truncated, true);
+  assert.equal(output.content.data.output.fullOutputRetainedBy, 'codex-rollout');
+  assert.match(output.content.data.output.preview, /head/);
+});
+
 test('converts event_msg user and agent messages and skips token counts', () => {
   assert.deepEqual(convertCodexEvent({
     timestamp: '2026-04-18T05:15:03.000Z',
@@ -91,4 +110,36 @@ test('converts task_complete event into HAPI ready event', () => {
     content: { type: 'event', data: { type: 'ready' } },
     createdAt: 1776489306000
   });
+});
+
+test('converts context_compacted event into HAPI codex message during passive sync', () => {
+  assert.deepEqual(convertCodexEvent({
+    timestamp: '2026-04-18T05:15:06.500Z',
+    type: 'event_msg',
+    payload: { type: 'context_compacted', thread_id: 'thread-1' }
+  }), {
+    role: 'agent',
+    content: { type: 'codex', data: { type: 'context_compacted', thread_id: 'thread-1' } },
+    createdAt: 1776489306500
+  });
+});
+
+test('summarizes oversized exec_command_end payloads during passive sync', () => {
+  const output = convertCodexEvent({
+    timestamp: '2026-04-18T05:15:07.000Z',
+    type: 'event_msg',
+    payload: {
+      type: 'exec_command_end',
+      call_id: 'call_exec_big',
+      stdout: `head\n${'x'.repeat(5000)}\ntail`,
+      stderr: '',
+      exit_code: 0
+    }
+  }, { maxToolOutputChars: 80 });
+
+  assert.equal(output.content.data.type, 'tool-call-result');
+  assert.equal(output.content.data.callId, 'call_exec_big');
+  assert.equal(output.content.data.output.type, 'hapi-tool-output-summary');
+  assert.equal(output.content.data.output.toolName, 'CodexBash');
+  assert.match(output.content.data.output.preview, /head/);
 });

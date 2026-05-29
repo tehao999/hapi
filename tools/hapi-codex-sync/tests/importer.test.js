@@ -319,6 +319,250 @@ test('user-only mode writes deduped user messages and skips agent/tool events', 
   assert.equal(writes[0].message.content.text, 'desktop live message\n');
 });
 
+test('assistant-only mode writes assistant replies and ready events while skipping users and tools', async () => {
+  const { dbPath, rolloutPath } = tempHarness();
+  const lines = [
+    { timestamp: '2026-04-18T05:00:00.000Z', type: 'session_meta', payload: { id: 'codex-1' } },
+    {
+      timestamp: '2026-04-18T05:00:01.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'desktop user should not mirror back' }]
+      }
+    },
+    {
+      timestamp: '2026-04-18T05:00:02.000Z',
+      type: 'response_item',
+      payload: { type: 'function_call', name: 'exec_command', call_id: 'call_1', arguments: '{"cmd":"pwd"}' }
+    },
+    {
+      timestamp: '2026-04-18T05:00:03.000Z',
+      type: 'response_item',
+      payload: { type: 'function_call_output', call_id: 'call_1', output: 'ok' }
+    },
+    {
+      timestamp: '2026-04-18T05:00:04.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'assistant reply should sync' }],
+        phase: 'final_answer'
+      }
+    },
+    { timestamp: '2026-04-18T05:00:05.000Z', type: 'event_msg', payload: { type: 'task_complete' } }
+  ];
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+
+  const writes = [];
+  const result = await importRolloutFile.withSink({
+    hapiDbPath: dbPath,
+    threadId: 'codex-1',
+    rolloutPath,
+    fromLine: 1,
+    mode: 'assistant-only',
+    sink: {
+      async write(item) {
+        writes.push(item);
+        return { inserted: true };
+      }
+    }
+  });
+
+  assert.deepEqual(result, { read: 6, converted: 2, inserted: 2, skipped: 4, missingSession: false });
+  assert.equal(writes.length, 2);
+  assert.equal(writes[0].message.role, 'agent');
+  assert.equal(writes[0].message.content.data.message, 'assistant reply should sync');
+  assert.equal(writes[1].message.content.type, 'event');
+  assert.equal(writes[1].message.content.data.type, 'ready');
+});
+
+test('assistant-only mode waits on messages newer than maxCreatedAt without advancing the cursor', async () => {
+  const { dbPath, rolloutPath } = tempHarness();
+  const lines = [
+    { timestamp: '2026-04-18T05:00:00.000Z', type: 'session_meta', payload: { id: 'codex-1' } },
+    {
+      timestamp: '2026-04-18T05:00:01.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'mature answer' }],
+        phase: 'final_answer'
+      }
+    },
+    {
+      timestamp: '2026-04-18T05:00:10.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'too new answer' }],
+        phase: 'final_answer'
+      }
+    }
+  ];
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+
+  const writes = [];
+  const result = await importRolloutFile.withSink({
+    hapiDbPath: dbPath,
+    threadId: 'codex-1',
+    rolloutPath,
+    fromLine: 1,
+    mode: 'assistant-only',
+    maxCreatedAt: Date.parse('2026-04-18T05:00:05.000Z'),
+    sink: {
+      async write(item) {
+        writes.push(item);
+        return { inserted: true };
+      }
+    }
+  });
+
+  assert.deepEqual(result, { read: 2, converted: 1, inserted: 1, skipped: 1, missingSession: false });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].lineNumber, 2);
+  assert.equal(writes[0].message.content.data.message, 'mature answer');
+});
+
+test('assistant-only mode skips nearby ready events already emitted by HAPI', async () => {
+  const { dbPath, rolloutPath } = tempHarness();
+  execFileSync('sqlite3', [dbPath, `
+    insert into messages (id, session_id, content, created_at, seq, local_id)
+    values ('ready-1', 'hapi-1', '{"role":"agent","content":{"type":"event","data":{"type":"ready"}},"meta":{"sentFrom":"cli"}}', 1770000001000, 1, null);
+    update sessions set seq = 1 where id = 'hapi-1';
+  `]);
+  const lines = [
+    { timestamp: '2026-02-02T02:40:01.500Z', type: 'event_msg', payload: { type: 'task_complete' } }
+  ];
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+
+  const writes = [];
+  const result = await importRolloutFile.withSink({
+    hapiDbPath: dbPath,
+    threadId: 'codex-1',
+    rolloutPath,
+    fromLine: 1,
+    mode: 'assistant-only',
+    sink: {
+      async write(item) {
+        writes.push(item);
+        return { inserted: true };
+      }
+    }
+  });
+
+  assert.deepEqual(result, { read: 1, converted: 1, inserted: 0, skipped: 1, missingSession: false });
+  assert.equal(writes.length, 0);
+});
+
+test('live sink skips delayed HAPI-origin assistant replays before sending to hub', async () => {
+  const { dbPath, rolloutPath } = tempHarness();
+  execFileSync('sqlite3', [dbPath, `
+    insert into messages (id, session_id, content, created_at, seq, local_id)
+    values (
+      'runner-answer-1',
+      'hapi-1',
+      '{"role":"agent","content":{"type":"codex","data":{"type":"message","message":"runner answer already stored"}},"meta":{"sentFrom":"cli"}}',
+      ${Date.parse('2026-02-02T02:40:01.000Z')},
+      1,
+      null
+    );
+    update sessions set seq = 1 where id = 'hapi-1';
+  `]);
+  const lines = [
+    {
+      timestamp: '2026-02-02T02:40:21.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'runner answer already stored' }],
+        phase: 'final_answer'
+      }
+    }
+  ];
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+
+  const writes = [];
+  const result = await importRolloutFile.withSink({
+    hapiDbPath: dbPath,
+    threadId: 'codex-1',
+    rolloutPath,
+    fromLine: 1,
+    mode: 'assistant-only',
+    sink: {
+      async write(item) {
+        writes.push(item);
+        return { inserted: true };
+      }
+    }
+  });
+
+  assert.deepEqual(result, { read: 1, converted: 1, inserted: 0, skipped: 1, missingSession: false });
+  assert.equal(writes.length, 0);
+});
+
+test('live sink skips HAPI-origin assistant replays that only add memory citations', async () => {
+  const { dbPath, rolloutPath } = tempHarness();
+  const hapiRunnerText = [
+    '已开始按 `superpowers:brainstorming` 做设计，不写代码、不改 live 配置。',
+    '',
+    '推荐选：**是**。这样最利于版本隔离、回滚和未来 OpenClaw 升级稳定。'
+  ].join('\n');
+  const desktopReplayText = `${hapiRunnerText}\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:937-943|note=[OpenClaw voice provider history]\n</citation_entries>\n<rollout_ids>\n019d9fe2-c00a-7dd0-8681-8dd3583d2071\n</rollout_ids>\n</oai-mem-citation>`;
+  execFileSync('sqlite3', [dbPath, `
+    insert into messages (id, session_id, content, created_at, seq, local_id)
+    values (
+      'runner-answer-without-citation',
+      'hapi-1',
+      '${JSON.stringify({
+        role: 'agent',
+        content: { type: 'codex', data: { type: 'message', message: hapiRunnerText } },
+        meta: { sentFrom: 'cli' }
+      }).replaceAll("'", "''")}',
+      ${Date.parse('2026-02-02T02:40:01.000Z')},
+      1,
+      null
+    );
+    update sessions set seq = 1 where id = 'hapi-1';
+  `]);
+  const lines = [
+    {
+      timestamp: '2026-02-02T02:40:01.500Z',
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: desktopReplayText }],
+        phase: 'final_answer'
+      }
+    }
+  ];
+  fs.writeFileSync(rolloutPath, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+
+  const writes = [];
+  const result = await importRolloutFile.withSink({
+    hapiDbPath: dbPath,
+    threadId: 'codex-1',
+    rolloutPath,
+    fromLine: 1,
+    mode: 'assistant-only',
+    sink: {
+      async write(item) {
+        writes.push(item);
+        return { inserted: true };
+      }
+    }
+  });
+
+  assert.deepEqual(result, { read: 1, converted: 1, inserted: 0, skipped: 1, missingSession: false });
+  assert.equal(writes.length, 0);
+});
+
 test('live sink stops at retryable passive sync rejections and returns nextFromLine for retry', async () => {
   const { dbPath, rolloutPath } = tempHarness();
   const lines = [

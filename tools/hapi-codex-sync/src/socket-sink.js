@@ -117,7 +117,9 @@ function createCliMessageSink({
       if (socket) {
         socket.emit('session-end', {
           sid: sessionId,
-          time: Date.now()
+          time: Date.now(),
+          source: 'codex-desktop-sync',
+          generation
         });
         socket.disconnect();
         socket = null;

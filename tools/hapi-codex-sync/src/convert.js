@@ -29,6 +29,52 @@ function parseArgs(value) {
   }
 }
 
+const DEFAULT_MAX_TOOL_OUTPUT_CHARS = 20_000;
+const PREVIEW_HEAD_CHARS = 6_000;
+const PREVIEW_TAIL_CHARS = 2_000;
+
+function stringifyOutput(value) {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function previewText(text, maxChars) {
+  const budget = Math.max(200, maxChars);
+  if (text.length <= budget) return text;
+
+  const head = Math.min(PREVIEW_HEAD_CHARS, Math.floor(budget * 0.7));
+  const tail = Math.min(PREVIEW_TAIL_CHARS, Math.max(0, budget - head - 160));
+  const omitted = Math.max(0, text.length - head - tail);
+  return [
+    text.slice(0, head),
+    `\n\n[HAPI truncated ${omitted} chars from this tool output. Full output remains in the Codex rollout/tool history.]\n\n`,
+    tail > 0 ? text.slice(-tail) : ''
+  ].join('');
+}
+
+function compactToolOutputForHapi(output, options = {}) {
+  const maxChars = Number.isInteger(options.maxToolOutputChars) && options.maxToolOutputChars > 0
+    ? options.maxToolOutputChars
+    : DEFAULT_MAX_TOOL_OUTPUT_CHARS;
+  const serialized = stringifyOutput(output);
+  if (serialized.length <= maxChars) return output;
+
+  return {
+    type: 'hapi-tool-output-summary',
+    truncated: true,
+    callId: options.callId || undefined,
+    toolName: options.toolName || undefined,
+    originalChars: serialized.length,
+    preview: previewText(serialized, maxChars),
+    fullOutputRetainedBy: 'codex-rollout',
+    note: 'HAPI summarized this oversized tool result to keep the chat bridge responsive; the Codex thread still retains its native tool history.'
+  };
+}
+
 function hapiUser(text, createdAt) {
   if (!text) return null;
   return { role: 'user', content: { type: 'text', text }, createdAt };
@@ -42,7 +88,7 @@ function hapiEvent(data, createdAt) {
   return { role: 'agent', content: { type: 'event', data }, createdAt };
 }
 
-function convertCodexEvent(event) {
+function convertCodexEvent(event, options = {}) {
   if (!event || typeof event !== 'object') return null;
   const createdAt = timestampMs(event);
   const payload = event.payload || {};
@@ -67,10 +113,14 @@ function convertCodexEvent(event) {
       }, createdAt);
     }
     if (payload.type === 'function_call_output') {
+      const callId = payload.call_id || payload.callId;
       return hapiAgent({
         type: 'tool-call-result',
-        callId: payload.call_id || payload.callId,
-        output: payload.output
+        callId,
+        output: compactToolOutputForHapi(payload.output, {
+          ...options,
+          callId
+        })
       }, createdAt);
     }
     return null;
@@ -86,11 +136,26 @@ function convertCodexEvent(event) {
     if (payload.type === 'task_complete') {
       return hapiEvent({ type: 'ready' }, createdAt);
     }
+    if (payload.type === 'context_compacted') {
+      const data = { type: 'context_compacted' };
+      for (const [key, value] of Object.entries(payload)) {
+        if (key !== 'type') data[key] = value;
+      }
+      return hapiAgent(data, createdAt);
+    }
     if (payload.type === 'exec_command_begin') {
       return hapiAgent({ type: 'tool-call', name: 'CodexBash', callId: payload.call_id, input: { command: payload.command, cwd: payload.cwd } }, createdAt);
     }
     if (payload.type === 'exec_command_end') {
-      return hapiAgent({ type: 'tool-call-result', callId: payload.call_id, output: payload }, createdAt);
+      return hapiAgent({
+        type: 'tool-call-result',
+        callId: payload.call_id,
+        output: compactToolOutputForHapi(payload, {
+          ...options,
+          callId: payload.call_id,
+          toolName: 'CodexBash'
+        })
+      }, createdAt);
     }
     return null;
   }

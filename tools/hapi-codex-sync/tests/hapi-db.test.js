@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { findHapiSessionByCodexId, updateSessionMetadata, insertMessageIfMissing } = require('../src/hapi-db');
+const { findHapiSessionByCodexId, updateSessionMetadata, insertMessageIfMissing, sqlString } = require('../src/hapi-db');
 
 function tempDb() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hapi-db-test-'));
@@ -208,6 +208,82 @@ test('dedupes nearby assistant commentary replay when live copy omitted phase', 
 
   assert.equal(first.inserted, true);
   assert.deepEqual(second, { inserted: false, seq: 1 });
+  const rows = JSON.parse(execFileSync('sqlite3', ['-json', dbPath, 'select count(*) as n from messages']).toString());
+  assert.equal(rows[0].n, 1);
+});
+
+test('dedupes delayed assistant replay against recent non-desktop HAPI runner copy', () => {
+  const dbPath = tempDb();
+  execFileSync('sqlite3', [dbPath, `
+    insert into messages (id, session_id, content, created_at, seq, local_id)
+    values (
+      'runner-copy',
+      'hapi-1',
+      '{"role":"agent","content":{"type":"codex","data":{"type":"message","message":"delayed same answer"}},"meta":{"sentFrom":"cli"}}',
+      4000,
+      1,
+      null
+    );
+    update sessions set seq = 1 where id = 'hapi-1';
+  `]);
+  const second = insertMessageIfMissing(dbPath, {
+    sessionId: 'hapi-1',
+    localId: 'codex:codex-1:120:delayed',
+    createdAt: 25000,
+    message: {
+      role: 'agent',
+      content: { type: 'codex', data: { type: 'message', message: 'delayed same answer', phase: 'final_answer' } }
+    }
+  }, {
+    nonDesktopAgentTextDuplicateWindowMs: 30000,
+    agentTextDuplicate: true,
+    agentTextDuplicateWindowMs: 2000
+  });
+
+  assert.deepEqual(second, { inserted: false, seq: 1 });
+  const rows = JSON.parse(execFileSync('sqlite3', ['-json', dbPath, 'select count(*) as n from messages']).toString());
+  assert.equal(rows[0].n, 1);
+});
+
+test('dedupes assistant replay that only appends a memory citation block', () => {
+  const dbPath = tempDb();
+  const hapiRunnerText = [
+    '已开始按 `superpowers:brainstorming` 做设计，不写代码、不改 live 配置。',
+    '',
+    '推荐选：**是**。这样最利于版本隔离、回滚和未来 OpenClaw 升级稳定。'
+  ].join('\n');
+  const desktopReplayText = `${hapiRunnerText}\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:937-943|note=[OpenClaw voice provider history]\n</citation_entries>\n<rollout_ids>\n019d9fe2-c00a-7dd0-8681-8dd3583d2071\n</rollout_ids>\n</oai-mem-citation>`;
+  execFileSync('sqlite3', [dbPath, `
+    insert into messages (id, session_id, content, created_at, seq, local_id)
+    values (
+      'runner-memory-citation-copy',
+      'hapi-1',
+      ${sqlString(JSON.stringify({
+        role: 'agent',
+        content: { type: 'codex', data: { type: 'message', message: hapiRunnerText } },
+        meta: { sentFrom: 'cli' }
+      }))},
+      4000,
+      1,
+      null
+    );
+    update sessions set seq = 1 where id = 'hapi-1';
+  `]);
+  const result = insertMessageIfMissing(dbPath, {
+    sessionId: 'hapi-1',
+    localId: 'codex:codex-1:121:memory-citation',
+    createdAt: 5000,
+    message: {
+      role: 'agent',
+      content: { type: 'codex', data: { type: 'message', message: desktopReplayText, phase: 'final_answer' } }
+    }
+  }, {
+    nonDesktopAgentTextDuplicateWindowMs: 30000,
+    agentTextDuplicate: true,
+    agentTextDuplicateWindowMs: 2000
+  });
+
+  assert.deepEqual(result, { inserted: false, seq: 1 });
   const rows = JSON.parse(execFileSync('sqlite3', ['-json', dbPath, 'select count(*) as n from messages']).toString());
   assert.equal(rows[0].n, 1);
 });

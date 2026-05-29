@@ -31,6 +31,35 @@ function findHapiSessionByCodexId(dbPath, codexSessionId) {
   };
 }
 
+function listHapiSessionsWithCodexIds(dbPath) {
+  const rows = sqliteJson(dbPath, `
+    select *
+    from sessions
+    where json_extract(metadata, '$.codexSessionId') is not null
+      and trim(json_extract(metadata, '$.codexSessionId')) != ''
+    order by coalesce(active, 0) desc, coalesce(active_at, 0) desc, updated_at desc, created_at desc
+  `);
+  const seen = new Set();
+  const sessions = [];
+  for (const row of rows) {
+    let metadata = null;
+    try {
+      metadata = row.metadata ? JSON.parse(row.metadata) : null;
+    } catch {
+      continue;
+    }
+    const codexSessionId = typeof metadata?.codexSessionId === 'string' ? metadata.codexSessionId.trim() : '';
+    if (!codexSessionId || seen.has(codexSessionId)) continue;
+    seen.add(codexSessionId);
+    sessions.push({
+      ...row,
+      metadata,
+      codexSessionId
+    });
+  }
+  return sessions;
+}
+
 function updateSessionMetadata(dbPath, sessionId, metadata, expectedVersion) {
   const version = Number(expectedVersion);
   if (!Number.isInteger(version) || version < 1) {
@@ -115,6 +144,13 @@ function findRecentNonDesktopUserTextDuplicate(dbPath, sessionId, text, createdA
   return rows.length > 0 ? rows[0].seq : null;
 }
 
+function normalizeAgentTextForDuplicateCheck(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\n*<oai-mem-citation>[\s\S]*<\/oai-mem-citation>\s*$/, '')
+    .trimEnd();
+}
+
 function agentMessageSignature(message) {
   if (!message || message.role !== 'agent') return null;
   const content = message.content;
@@ -122,7 +158,7 @@ function agentMessageSignature(message) {
   const data = content.data;
   if (!data || data.type !== 'message' || typeof data.message !== 'string') return null;
   return JSON.stringify({
-    message: data.message,
+    message: normalizeAgentTextForDuplicateCheck(data.message),
     phase: typeof data.phase === 'string' ? data.phase : null
   });
 }
@@ -134,7 +170,7 @@ function parsedAgentMessage(message) {
   const data = content.data;
   if (!data || data.type !== 'message' || typeof data.message !== 'string') return null;
   return {
-    message: data.message,
+    message: normalizeAgentTextForDuplicateCheck(data.message),
     phase: typeof data.phase === 'string' ? data.phase : null
   };
 }
@@ -159,6 +195,15 @@ function agentToolSignature(message) {
     type: data.type,
     callId: data.callId
   });
+}
+
+function parsedReadyEvent(message) {
+  if (!message || message.role !== 'agent') return null;
+  const content = message.content;
+  if (!content || content.type !== 'event') return null;
+  const data = content.data;
+  if (!data || data.type !== 'ready') return null;
+  return { type: 'ready' };
 }
 
 function findAgentTextDuplicate(dbPath, sessionId, message, createdAt, windowMs = 2000) {
@@ -206,6 +251,47 @@ function findRecentNonDesktopToolDuplicate(dbPath, sessionId, message, createdAt
   return null;
 }
 
+function findRecentNonDesktopAgentTextDuplicate(dbPath, sessionId, message, createdAt, windowMs = 30000) {
+  if (!parsedAgentMessage(message)) return null;
+  const created = Number(createdAt || 0);
+  const rows = sqliteJson(dbPath, `
+    select seq, content from messages
+    where session_id = ${sqlString(sessionId)}
+      and json_extract(content, '$.role') = 'agent'
+      and json_extract(content, '$.content.type') = 'codex'
+      and json_extract(content, '$.content.data.type') = 'message'
+      and abs(created_at - ${created}) <= ${Number(windowMs)}
+      and (local_id is null or local_id not like 'codex:%')
+      and coalesce(json_extract(content, '$.meta.sentFrom'), '') != 'codex-desktop-sync'
+    order by seq asc
+  `);
+  for (const row of rows) {
+    try {
+      const existing = JSON.parse(row.content);
+      if (agentMessagesEquivalent(existing, message)) return row.seq;
+    } catch {
+      // ignore malformed existing messages
+    }
+  }
+  return null;
+}
+
+function findAgentReadyDuplicate(dbPath, sessionId, message, createdAt, windowMs = 5000) {
+  if (!parsedReadyEvent(message)) return null;
+  const created = Number(createdAt || 0);
+  const rows = sqliteJson(dbPath, `
+    select seq, content from messages
+    where session_id = ${sqlString(sessionId)}
+      and json_extract(content, '$.role') = 'agent'
+      and json_extract(content, '$.content.type') = 'event'
+      and json_extract(content, '$.content.data.type') = 'ready'
+      and abs(created_at - ${created}) <= ${Number(windowMs)}
+    order by seq asc
+    limit 1
+  `);
+  return rows.length > 0 ? rows[0].seq : null;
+}
+
 function messageAlreadyStored(dbPath, sessionId, localId, createdAt, message, options = {}) {
   const semanticSeq = findSemanticDuplicate(dbPath, sessionId, createdAt, message);
   if (semanticSeq !== null) return true;
@@ -233,9 +319,23 @@ function messageAlreadyStored(dbPath, sessionId, localId, createdAt, message, op
     );
     if (toolSeq !== null) return true;
   }
+  if (options.nonDesktopAgentTextDuplicateWindowMs && message?.role === 'agent') {
+    const agentTextSeq = findRecentNonDesktopAgentTextDuplicate(
+      dbPath,
+      sessionId,
+      message,
+      createdAt,
+      options.nonDesktopAgentTextDuplicateWindowMs
+    );
+    if (agentTextSeq !== null) return true;
+  }
   if (options.agentTextDuplicate) {
     const agentSeq = findAgentTextDuplicate(dbPath, sessionId, message, createdAt, options.agentTextDuplicateWindowMs);
     if (agentSeq !== null) return true;
+  }
+  if (options.agentReadyDuplicate) {
+    const readySeq = findAgentReadyDuplicate(dbPath, sessionId, message, createdAt, options.agentReadyDuplicateWindowMs);
+    if (readySeq !== null) return true;
   }
   if (!localId) return false;
   const existing = sqliteJson(dbPath, `
@@ -281,10 +381,28 @@ function insertMessageIfMissing(dbPath, { sessionId, localId, createdAt, message
       return { inserted: false, seq: toolSeq };
     }
   }
+  if (options.nonDesktopAgentTextDuplicateWindowMs && message?.role === 'agent') {
+    const agentTextSeq = findRecentNonDesktopAgentTextDuplicate(
+      dbPath,
+      sessionId,
+      message,
+      createdAt,
+      options.nonDesktopAgentTextDuplicateWindowMs
+    );
+    if (agentTextSeq !== null) {
+      return { inserted: false, seq: agentTextSeq };
+    }
+  }
   if (options.agentTextDuplicate) {
     const agentSeq = findAgentTextDuplicate(dbPath, sessionId, message, createdAt, options.agentTextDuplicateWindowMs);
     if (agentSeq !== null) {
       return { inserted: false, seq: agentSeq };
+    }
+  }
+  if (options.agentReadyDuplicate) {
+    const readySeq = findAgentReadyDuplicate(dbPath, sessionId, message, createdAt, options.agentReadyDuplicateWindowMs);
+    if (readySeq !== null) {
+      return { inserted: false, seq: readySeq };
     }
   }
 
@@ -318,6 +436,7 @@ function insertMessageIfMissing(dbPath, { sessionId, localId, createdAt, message
 
 module.exports = {
   findHapiSessionByCodexId,
+  listHapiSessionsWithCodexIds,
   updateSessionMetadata,
   insertMessageIfMissing,
   sqliteJson,
@@ -328,6 +447,8 @@ module.exports = {
   findUserTextDuplicate,
   findRecentNonDesktopUserTextDuplicate,
   findAgentTextDuplicate,
+  findRecentNonDesktopAgentTextDuplicate,
   findRecentNonDesktopToolDuplicate,
+  findAgentReadyDuplicate,
   messageAlreadyStored
 };

@@ -11,8 +11,10 @@ Local bridge for syncing official Codex Desktop rollout JSONL events into HAPI, 
   - tool calls
   - tool call results
   - shell command begin/end events
+- In `watch-all --mode assistant-only`, only mirrors assistant text plus the ready event. It does not mirror user echoes or tool traffic.
 - Finds the HAPI session via `sessions.metadata.codexSessionId`.
 - Inserts messages idempotently using a `codex:<threadId>:<line>:<hash>` `local_id` plus semantic duplicate checks.
+- `watch-all` discovers every HAPI session that has `metadata.codexSessionId` and maintains an independent cursor per Codex thread in `/Users/tehao/.hapi/hapi-codex-sync-state.json`.
 
 ## Commands
 
@@ -32,12 +34,15 @@ node bin/hapi-codex-sync.js watch \
   --interval-ms 500
 
 # Preferred live mode: send through HAPI's CLI socket so HAPI Web/mobile receives SSE updates
-node bin/hapi-codex-sync.js watch \
+node bin/hapi-codex-sync.js watch-all \
   --delivery socket \
-  --mode all \
-  --thread-id 019d9e2b-a05a-7c10-9d56-4d7d708c0ac0 \
-  --from-line 2510 \
-  --interval-ms 500
+  --mode assistant-only \
+  --start-at end \
+  --interval-ms 1000 \
+  --min-event-age-ms 5000
+
+# Inspect persisted watch-all cursors and recent per-thread errors
+node bin/hapi-codex-sync.js status
 ```
 
 ## Safety notes
@@ -49,7 +54,11 @@ mkdir -p /Users/tehao/.hapi/backups
 cp /Users/tehao/.hapi/hapi.db /Users/tehao/.hapi/backups/hapi.db.pre-hapi-codex-sync-$(date +%Y%m%d-%H%M%S)
 ```
 
-Use `--delivery socket --mode all` for full live HAPI Web/mobile mirroring from a Desktop-started thread. In that mode this tool connects to HAPI's local `/cli` Socket.IO namespace using the local CLI token and syncs user messages, assistant text, tool calls, and tool results through HAPI's passive `sync-message` channel, so Web/mobile receives SSE updates without re-triggering execution on the HAPI runner. `--mode user-only` remains available when you want a minimal mirror that only shows human input. The default `--delivery db` mode writes directly to SQLite and may require a page refresh.
+Use `--delivery socket --mode assistant-only` for the normal HAPI-origin thread use case: Codex Desktop can continue the thread, and HAPI Web/mobile receives the assistant replies without importing tool-call noise back into the HAPI transcript. In that mode this tool connects to HAPI's local `/cli` Socket.IO namespace using the local CLI token and sends mirrored messages through HAPI's passive `sync-message` channel, so Web/mobile receives SSE updates without re-triggering execution on the HAPI runner. `--mode all` remains available for one-off full mirroring, and `--mode user-only` remains available when you want a minimal mirror that only shows human input. The default `--delivery db` mode writes directly to SQLite and may require a page refresh.
+
+`watch-all` defaults to `--start-at end`, so newly discovered historical threads start from the end of their current rollout and only sync future Desktop additions. Use `import-thread --from-line <n>` for deliberate manual backfills.
+
+Use a small `--min-event-age-ms` delay in live `watch-all` mode. That gives an active HAPI-runner turn time to write its own assistant message first, so the desktop mirror can detect and skip HAPI-origin duplicates while still syncing real Desktop-side continuations shortly after they appear.
 
 The watcher also suppresses recent HAPI-origin echoes that appear back in the Codex rollout after a mobile/web takeover turn:
 

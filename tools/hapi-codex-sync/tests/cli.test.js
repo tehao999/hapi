@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseArgs, runWatchIteration } = require('../src/cli');
+const { parseArgs, runWatchIteration, runWatchAllIteration } = require('../src/cli');
 
 test('parses import-file args with defaults', () => {
   assert.deepEqual(parseArgs(['import-file', '--thread-id', 't1', '--file', '/tmp/a.jsonl']), {
@@ -11,11 +11,16 @@ test('parses import-file args with defaults', () => {
     codexDb: '/Users/tehao/.codex/state_5.sqlite',
     hapiSettings: '/Users/tehao/.hapi/settings.json',
     hubUrl: 'http://127.0.0.1:3006',
+    stateFile: '/Users/tehao/.hapi/hapi-codex-sync-state.json',
     namespace: 'default',
     delivery: 'db',
     mode: 'all',
     fromLine: 1,
-    intervalMs: 1000
+    intervalMs: 1000,
+    startAt: 'end',
+    maxBackoffMs: 30000,
+    minEventAgeMs: 0,
+    watchAllMaxAgeMs: 30 * 60 * 1000
   });
 });
 
@@ -26,9 +31,26 @@ test('parses import-thread and watch args', () => {
   assert.equal(watch.intervalMs, 2500);
 });
 
+test('parses watch-all without a thread id and defaults to safe end baseline', () => {
+  const opts = parseArgs(['watch-all', '--delivery', 'socket', '--mode', 'assistant-only']);
+  assert.equal(opts.command, 'watch-all');
+  assert.equal(opts.threadId, undefined);
+  assert.equal(opts.delivery, 'socket');
+  assert.equal(opts.mode, 'assistant-only');
+  assert.equal(opts.startAt, 'end');
+  assert.equal(opts.watchAllMaxAgeMs, 30 * 60 * 1000);
+});
+
+test('parses watch-all max age override', () => {
+  const opts = parseArgs(['watch-all', '--watch-all-max-age-ms', '0']);
+  assert.equal(opts.watchAllMaxAgeMs, 0);
+  assert.throws(() => parseArgs(['watch-all', '--watch-all-max-age-ms', '-1']), /--watch-all-max-age-ms/);
+});
+
 test('throws for missing required args', () => {
   assert.throws(() => parseArgs(['import-file', '--thread-id', 't1']), /--file is required/);
   assert.throws(() => parseArgs(['import-thread']), /--thread-id is required/);
+  assert.doesNotThrow(() => parseArgs(['watch-all']));
 });
 
 test('parses live socket delivery options', () => {
@@ -40,7 +62,163 @@ test('parses live socket delivery options', () => {
 });
 
 test('throws for invalid mode', () => {
-  assert.throws(() => parseArgs(['watch', '--thread-id', 'abc', '--mode', 'tools-only']), /--mode must be all or user-only/);
+  assert.throws(() => parseArgs(['watch', '--thread-id', 'abc', '--mode', 'tools-only']), /--mode must be all, user-only, or assistant-only/);
+});
+
+test('watch-all runs each discovered HAPI Codex session with independent cursors', async () => {
+  const opened = [];
+  const imports = [];
+  const opts = {
+    command: 'watch-all',
+    codexDb: '/tmp/codex.db',
+    hapiDb: '/tmp/hapi.db',
+    hapiSettings: '/tmp/settings.json',
+    hubUrl: 'http://127.0.0.1:3006',
+    namespace: 'default',
+    delivery: 'socket',
+    mode: 'assistant-only',
+    fromLine: 1,
+    startAt: 'from-line',
+    intervalMs: 1000
+  };
+
+  const result = await runWatchAllIteration(opts, {
+    threads: {
+      'thread-2': { fromLine: 7 }
+    }
+  }, {
+    listSessions() {
+      return [
+        { id: 'session-1', codexSessionId: 'thread-1', metadata: { executionControl: { generation: 1 } } },
+        { id: 'session-2', codexSessionId: 'thread-2', metadata: { executionControl: { generation: 2 } } }
+      ];
+    },
+    getThread(_dbPath, threadId) {
+      return {
+        id: threadId,
+        rolloutPath: `/tmp/${threadId}.jsonl`,
+        title: `${threadId} title`,
+        updatedAtMs: 1000
+      };
+    },
+    findSession(_dbPath, threadId) {
+      return {
+        id: threadId === 'thread-1' ? 'session-1' : 'session-2',
+        metadata_version: 1,
+        metadata: { executionControl: { generation: threadId === 'thread-1' ? 1 : 2 } }
+      };
+    },
+    readToken() {
+      return 'secret:default';
+    },
+    createSink({ sessionId, generation }) {
+      return {
+        async open() {
+          opened.push({ sessionId, generation });
+        },
+        async close() {},
+        async updateMetadata() {
+          return { result: 'success' };
+        }
+      };
+    },
+    async importWithSink(args) {
+      imports.push({ threadId: args.threadId, fromLine: args.fromLine, mode: args.mode });
+      return {
+        read: 2,
+        converted: 1,
+        inserted: 1,
+        skipped: 1,
+        missingSession: false
+      };
+    }
+  });
+
+  assert.deepEqual(opened, [
+    { sessionId: 'session-1', generation: 1 },
+    { sessionId: 'session-2', generation: 2 }
+  ]);
+  assert.deepEqual(imports, [
+    { threadId: 'thread-1', fromLine: 1, mode: 'assistant-only' },
+    { threadId: 'thread-2', fromLine: 7, mode: 'assistant-only' }
+  ]);
+  assert.equal(result.threads['thread-1'].fromLine, 3);
+  assert.equal(result.threads['thread-2'].fromLine, 9);
+  assert.equal(result.reports.length, 2);
+});
+
+test('watch-all skips stale sessions while keeping recent, live, and recently-written rollout threads', async () => {
+  const imports = [];
+  const opts = {
+    command: 'watch-all',
+    codexDb: '/tmp/codex.db',
+    hapiDb: '/tmp/hapi.db',
+    delivery: 'db',
+    mode: 'assistant-only',
+    fromLine: 1,
+    startAt: 'from-line',
+    intervalMs: 1000,
+    minEventAgeMs: 0,
+    watchAllMaxAgeMs: 1000
+  };
+  const sessions = [
+    { id: 'recent-session', codexSessionId: 'recent-thread', updated_at: 9500, metadata: { codexSessionId: 'recent-thread' } },
+    { id: 'stale-session', codexSessionId: 'stale-thread', updated_at: 100, metadata: { codexSessionId: 'stale-thread' } },
+    { id: 'rollout-session', codexSessionId: 'rollout-thread', updated_at: 100, metadata: { codexSessionId: 'rollout-thread' } },
+    { id: 'live-session', codexSessionId: 'live-thread', updated_at: 100, metadata: { codexSessionId: 'live-thread' } }
+  ];
+
+  const result = await runWatchAllIteration(opts, {
+    threads: {
+      'rollout-thread': { rolloutPath: '/tmp/rollout-thread.jsonl' }
+    }
+  }, {
+    now: () => 10000,
+    listSessions() {
+      return sessions;
+    },
+    getThread(_dbPath, threadId) {
+      return {
+        id: threadId,
+        rolloutPath: `/tmp/${threadId}.jsonl`,
+        title: null,
+        updatedAtMs: 0
+      };
+    },
+    getFileMtimeMs(filePath) {
+      return filePath.includes('rollout-thread') ? 9500 : 100;
+    },
+    getLiveThreadIds() {
+      return new Set(['live-thread']);
+    },
+    getByteOffsetForLine() {
+      return 0;
+    },
+    findSession(_dbPath, threadId) {
+      const session = sessions.find((item) => item.codexSessionId === threadId);
+      return {
+        id: session.id,
+        metadata_version: 1,
+        metadata: { codexSessionId: threadId }
+      };
+    },
+    importDirect(args) {
+      imports.push(args.threadId);
+      return {
+        read: 1,
+        converted: 1,
+        inserted: 0,
+        skipped: 1,
+        missingSession: false,
+        nextFromLine: args.fromLine + 1,
+        nextByteOffset: 0
+      };
+    }
+  });
+
+  assert.deepEqual(imports, ['recent-thread', 'rollout-thread', 'live-thread']);
+  assert.equal(result.threads['stale-thread'], undefined);
+  assert.equal(result.reports.length, 3);
 });
 
 test('watch iteration rotates the socket sink on generation changes and respects nextFromLine retries', async () => {
