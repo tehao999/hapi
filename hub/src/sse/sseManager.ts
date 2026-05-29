@@ -20,10 +20,22 @@ export class SSEManager {
     private heartbeatTimer: NodeJS.Timeout | null = null
     private readonly heartbeatMs: number
     private readonly visibilityTracker: VisibilityTracker
+    private readonly maxConnectionsPerNamespace: number
 
-    constructor(heartbeatMs = 30_000, visibilityTracker: VisibilityTracker) {
+    constructor(heartbeatMs = 30_000, visibilityTracker: VisibilityTracker, maxConnectionsPerNamespace = 25) {
         this.heartbeatMs = heartbeatMs
         this.visibilityTracker = visibilityTracker
+        this.maxConnectionsPerNamespace = maxConnectionsPerNamespace
+    }
+
+    canAcceptSubscription(namespace: string): boolean {
+        let count = 0
+        for (const connection of this.connections.values()) {
+            if (connection.namespace === namespace) {
+                count += 1
+            }
+        }
+        return count < this.maxConnectionsPerNamespace
     }
 
     subscribe(options: {
@@ -35,7 +47,11 @@ export class SSEManager {
         visibility?: VisibilityState
         send: (event: SyncEvent) => void | Promise<void>
         sendHeartbeat: () => void | Promise<void>
-    }): SSESubscription {
+    }): SSESubscription | null {
+        if (!this.canAcceptSubscription(options.namespace)) {
+            return null
+        }
+
         const subscription: SSEConnection = {
             id: options.id,
             namespace: options.namespace,

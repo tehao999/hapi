@@ -252,7 +252,8 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         type: z.literal('connection-changed'),
         data: z.object({
             status: z.string(),
-            subscriptionId: z.string().optional()
+            subscriptionId: z.string().optional(),
+            reason: z.string().optional()
         }).optional()
     })
 ])

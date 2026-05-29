@@ -295,6 +295,24 @@ export function useSSE(options: {
             scheduleReconnect()
         }
 
+        const closeWithoutReconnect = (reason: string) => {
+            if (reconnectRequested) {
+                return
+            }
+            reconnectRequested = true
+            notifyDisconnect(reason)
+            eventSource.close()
+            if (eventSourceRef.current === eventSource) {
+                eventSourceRef.current = null
+            }
+            if (reconnectTimerRef.current) {
+                clearTimeout(reconnectTimerRef.current)
+                reconnectTimerRef.current = null
+            }
+            reconnectAttemptRef.current = 0
+            setSubscriptionId(null)
+        }
+
         const flushInvalidations = () => {
             const pending = pendingInvalidationsRef.current
             if (!pending.sessions && !pending.machines && pending.sessionIds.size === 0) {
@@ -518,6 +536,14 @@ export function useSSE(options: {
 
             if (event.type === 'connection-changed') {
                 const data = event.data
+                if (data && typeof data === 'object') {
+                    const status = (data as { status?: unknown }).status
+                    if (status === 'rejected') {
+                        const reason = (data as { reason?: unknown }).reason
+                        closeWithoutReconnect(`rejected:${typeof reason === 'string' && reason ? reason : 'unknown'}`)
+                        return
+                    }
+                }
                 if (data && typeof data === 'object' && 'subscriptionId' in data) {
                     const nextId = (data as { subscriptionId?: unknown }).subscriptionId
                     if (typeof nextId === 'string' && nextId.length > 0) {

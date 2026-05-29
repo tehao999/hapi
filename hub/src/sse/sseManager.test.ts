@@ -118,4 +118,26 @@ describe('SSEManager namespace filtering', () => {
         expect(received).toHaveLength(1)
         expect(received[0]?.id).toBe('visible')
     })
+
+    it('rejects subscriptions over the per-namespace connection cap', () => {
+        const manager = new SSEManager(0, new VisibilityTracker(), 1)
+
+        const first = manager.subscribe({
+            id: 'first',
+            namespace: 'alpha',
+            all: true,
+            send: () => {},
+            sendHeartbeat: () => {}
+        })
+        const second = manager.subscribe({
+            id: 'second',
+            namespace: 'alpha',
+            all: true,
+            send: () => {},
+            sendHeartbeat: () => {}
+        })
+
+        expect(first).not.toBeNull()
+        expect(second).toBeNull()
+    })
 })
