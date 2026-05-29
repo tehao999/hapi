@@ -88,7 +88,9 @@ export const runnerCommand: CommandDefinition = {
         }
 
         if (runnerSubcommand === 'status') {
-            await runDoctorCommand('runner')
+            await runDoctorCommand('runner', {
+                fullArgs: commandArgs.includes('--full-args') || commandArgs.includes('--verbose')
+            })
             process.exit(0)
         }
 
@@ -108,7 +110,8 @@ ${chalk.bold('hapi runner')} - Runner management
 ${chalk.bold('Usage:')}
   hapi runner start              Start the runner (detached)
   hapi runner stop               Stop the runner (sessions stay alive)
-  hapi runner status             Show runner status
+  hapi runner status             Show runner status (redacted process args by default)
+  hapi runner status --full-args Show runner status with full process argv
   hapi runner list               List active sessions
 
   If you want to kill all hapi related processes run 

@@ -8,10 +8,162 @@
 import psList from 'ps-list';
 import { killProcess } from '@/utils/process';
 
+const DEFAULT_PROCESS_COMMAND_MAX_LENGTH = 240;
+const SENSITIVE_VALUE_FLAGS = new Set(['--payload', '--initial-message', '--message', '--prompt']);
+const SAFE_VALUE_FLAGS = new Set([
+  '--cwd',
+  '--directory',
+  '--effort',
+  '--hapi-agent',
+  '--hapi-starting-mode',
+  '--model',
+  '--model-reasoning-effort',
+  '--permission-mode',
+  '--resume',
+  '--service-tier',
+  '--session',
+  '--worktree-name'
+]);
+const SAFE_POSITIONAL_TOKENS = new Set([
+  'auth',
+  'claude',
+  'codex',
+  'cursor',
+  'doctor',
+  'gemini',
+  'hapi',
+  'happy',
+  'node',
+  'opencode',
+  'runner',
+  'src/index.ts',
+  'start',
+  'start-sync',
+  'status',
+  'stop'
+]);
+
+export type ProcessCommandSanitizeOptions = {
+  maxLength?: number;
+};
+
+export type FindHappyProcessesOptions = {
+  fullArgs?: boolean;
+};
+
+function tokenizeCommand(command: string): string[] {
+  return command.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+}
+
+function stripQuotes(value: string): string {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function commandTokenLooksSafe(token: string, index: number): boolean {
+  const bare = stripQuotes(token);
+  if (index === 0) {
+    return true;
+  }
+  if (SAFE_POSITIONAL_TOKENS.has(bare)) {
+    return true;
+  }
+  return bare.endsWith('/hapi') || bare.endsWith('/hapi.exe') || bare.endsWith('/bun') || bare.endsWith('/node');
+}
+
+function splitFlag(token: string): { flag: string; inlineValue: string | null } {
+  const equalsIndex = token.indexOf('=');
+  if (equalsIndex < 0) {
+    return { flag: token, inlineValue: null };
+  }
+  return {
+    flag: token.slice(0, equalsIndex),
+    inlineValue: token.slice(equalsIndex + 1)
+  };
+}
+
+function pushRedactedPositional(output: string[]): void {
+  if (output[output.length - 1] !== '<arg>') {
+    output.push('<arg>');
+  }
+}
+
+export function sanitizeProcessCommand(command: string, options: ProcessCommandSanitizeOptions = {}): string {
+  const maxLength = Math.max(40, options.maxLength ?? DEFAULT_PROCESS_COMMAND_MAX_LENGTH);
+  const tokens = tokenizeCommand(command.replace(/\s+/g, ' ').trim());
+  if (tokens.length === 0) {
+    return '';
+  }
+
+  const output: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = stripQuotes(tokens[i] ?? '');
+    if (!token) continue;
+
+    if (token.startsWith('--')) {
+      const { flag, inlineValue } = splitFlag(token);
+
+      if (flag === '--started-by') {
+        if (inlineValue === 'runner') {
+          output.push('--started-by=runner', '<redacted>');
+        } else if (tokens[i + 1] && stripQuotes(tokens[i + 1]) === 'runner') {
+          output.push('--started-by', 'runner', '<redacted>');
+          i += 1;
+        } else {
+          output.push('--started-by', '<redacted>');
+        }
+        break;
+      }
+
+      if (SENSITIVE_VALUE_FLAGS.has(flag)) {
+        output.push(inlineValue === null ? `${flag} <redacted>` : `${flag}=<redacted>`);
+        while (tokens[i + 1] && !stripQuotes(tokens[i + 1]).startsWith('--')) {
+          i += 1;
+        }
+        continue;
+      }
+
+      if (SAFE_VALUE_FLAGS.has(flag)) {
+        if (inlineValue !== null) {
+          output.push(`${flag}=${stripQuotes(inlineValue)}`);
+        } else {
+          output.push(flag);
+          if (tokens[i + 1] && !stripQuotes(tokens[i + 1]).startsWith('--')) {
+            output.push(stripQuotes(tokens[i + 1]));
+            i += 1;
+          }
+        }
+        continue;
+      }
+
+      output.push(inlineValue === null ? flag : `${flag}=<redacted>`);
+      while (tokens[i + 1] && !stripQuotes(tokens[i + 1]).startsWith('--')) {
+        i += 1;
+      }
+      continue;
+    }
+
+    if (commandTokenLooksSafe(token, i)) {
+      output.push(token);
+    } else {
+      pushRedactedPositional(output);
+    }
+  }
+
+  const sanitized = output.join(' ');
+  if (sanitized.length > maxLength) {
+    return `${sanitized.slice(0, maxLength).trimEnd()}… [truncated; use --full-args]`;
+  }
+
+  return sanitized;
+}
+
 /**
  * Find all HAPI CLI processes (including current process)
  */
-export async function findAllHappyProcesses(): Promise<Array<{ pid: number, command: string, type: string }>> {
+export async function findAllHappyProcesses(options: FindHappyProcessesOptions = {}): Promise<Array<{ pid: number, command: string, type: string }>> {
   try {
     const processes = await psList();
     const allProcesses: Array<{ pid: number, command: string, type: string }> = [];
@@ -50,7 +202,12 @@ export async function findAllHappyProcesses(): Promise<Array<{ pid: number, comm
         type = isDevMode ? 'dev-related' : 'user-session';
       }
 
-      allProcesses.push({ pid: proc.pid, command: cmd || name, type });
+      const rawCommand = cmd || name;
+      allProcesses.push({
+        pid: proc.pid,
+        command: options.fullArgs ? rawCommand : sanitizeProcessCommand(rawCommand),
+        type
+      });
     }
 
     return allProcesses;

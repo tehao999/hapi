@@ -69,11 +69,15 @@ function getLogFiles(logDir: string): { file: string, path: string, modified: Da
 /**
  * Run doctor command specifically for runner diagnostics
  */
-export async function runDoctorRunner(): Promise<void> {
-    return runDoctorCommand('runner');
+export type DoctorCommandOptions = {
+    fullArgs?: boolean
 }
 
-export async function runDoctorCommand(filter?: 'all' | 'runner'): Promise<void> {
+export async function runDoctorRunner(options: DoctorCommandOptions = {}): Promise<void> {
+    return runDoctorCommand('runner', options);
+}
+
+export async function runDoctorCommand(filter?: 'all' | 'runner', options: DoctorCommandOptions = {}): Promise<void> {
     // Default to 'all' if no filter specified
     if (!filter) {
         filter = 'all';
@@ -178,9 +182,12 @@ export async function runDoctorCommand(filter?: 'all' | 'runner'): Promise<void>
         }
 
         // All hapi processes
-        const allProcesses = await findAllHappyProcesses();
+        const allProcesses = await findAllHappyProcesses({ fullArgs: options.fullArgs });
         if (allProcesses.length > 0) {
             console.log(chalk.bold('\n🔍 All hapi CLI Processes'));
+            if (!options.fullArgs) {
+                console.log(chalk.gray('  Process command lines are redacted/truncated by default. Use --full-args to show full argv.'));
+            }
 
             // Group by type
             const grouped = allProcesses.reduce((groups, process) => {
