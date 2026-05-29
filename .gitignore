@@ -39,6 +39,11 @@ localdocs/
 execplan/
 .worktrees/
 
+# Local agent/worktree hygiene artifacts
+/.tmp/
+/.hapi-work/
+/output/
+
 # Generated npm bundle output (local)
 cli/npm/main/
 .ace-tool/
