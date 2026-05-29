@@ -272,13 +272,14 @@ async function scanPluginCommands(agent: string): Promise<SlashCommand[]> {
  * built-in -> global user -> plugin -> project (project overrides same-name globals).
  */
 export async function listSlashCommands(agent: string, projectDir?: string): Promise<SlashCommand[]> {
-    const builtin = BUILTIN_COMMANDS[agent] ?? [];
+    const normalizedAgent = agent === 'claude-deepseek' ? 'claude' : agent;
+    const builtin = BUILTIN_COMMANDS[normalizedAgent] ?? [];
 
     // Scan all command sources in parallel
     const [user, plugin, project] = await Promise.all([
-        scanUserCommands(agent),
-        scanPluginCommands(agent),
-        scanProjectCommands(agent, projectDir),
+        scanUserCommands(normalizedAgent),
+        scanPluginCommands(normalizedAgent),
+        scanProjectCommands(normalizedAgent, projectDir),
     ]);
 
     const allCommands = [...builtin, ...user, ...plugin, ...project];

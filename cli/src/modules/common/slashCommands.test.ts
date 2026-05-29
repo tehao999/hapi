@@ -93,6 +93,39 @@ describe('listSlashCommands', () => {
         expect(command?.description).toBe('Trellis start')
     })
 
+    it('loads Claude built-in and custom commands for claude-deepseek', async () => {
+        await writeFile(
+            join(claudeConfigDir, 'commands', 'deepseek-user.md'),
+            ['---', 'description: DeepSeek user', '---', '', 'User command body'].join('\n')
+        )
+        await writeFile(
+            join(projectDir, '.claude', 'commands', 'deepseek-project.md'),
+            ['---', 'description: DeepSeek project', '---', '', 'Project command body'].join('\n')
+        )
+
+        const commands = await listSlashCommands('claude-deepseek', projectDir)
+
+        expect(commands).toContainEqual({
+            name: 'clear',
+            description: 'Clear conversation history',
+            source: 'builtin'
+        })
+        expect(commands).toContainEqual({
+            name: 'deepseek-user',
+            description: 'DeepSeek user',
+            source: 'user',
+            content: 'User command body',
+            pluginName: undefined
+        })
+        expect(commands).toContainEqual({
+            name: 'deepseek-project',
+            description: 'DeepSeek project',
+            source: 'project',
+            content: 'Project command body',
+            pluginName: undefined
+        })
+    })
+
     it('returns empty project commands when project directory does not exist', async () => {
         const nonExistentProjectDir = join(sandboxDir, 'not-exists')
 

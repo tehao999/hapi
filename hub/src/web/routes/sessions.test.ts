@@ -233,7 +233,7 @@ describe('sessions routes', () => {
 
         expect(response.status).toBe(400)
         expect(await response.json()).toEqual({
-            error: 'Effort selection is only supported for Claude sessions'
+            error: 'Effort selection is not supported for this session flavor'
         })
         expect(applySessionConfigCalls).toEqual([])
     })
@@ -244,6 +244,29 @@ describe('sessions routes', () => {
                 path: '/tmp/project',
                 host: 'localhost',
                 flavor: 'claude'
+            }
+        })
+        const { app, applySessionConfigCalls } = createApp(session)
+
+        const response = await app.request('/api/sessions/session-1/effort', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ effort: 'max' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ ok: true })
+        expect(applySessionConfigCalls).toEqual([
+            ['session-1', { effort: 'max' }]
+        ])
+    })
+
+    it('applies effort changes for claude-deepseek sessions', async () => {
+        const session = createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'claude-deepseek'
             }
         })
         const { app, applySessionConfigCalls } = createApp(session)
