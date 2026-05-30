@@ -336,6 +336,9 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                             session.onSessionFound(sessionId);
                         },
                         onThinkingChange: session.onThinkingChange,
+                        onTurnDuration: (durationMs: number) => {
+                            session.client.sendSessionEvent({ type: 'turn-duration', durationMs });
+                        },
                         claudeEnvVars: session.claudeEnvVars,
                         claudeArgs: session.claudeArgs,
                         onMessage,

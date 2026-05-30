@@ -33,6 +33,7 @@ export async function claudeRemote(opts: {
     // Callbacks
     onSessionFound: (id: string) => void,
     onThinkingChange?: (thinking: boolean) => void,
+    onTurnDuration?: (durationMs: number) => void,
     onMessage: (message: SDKMessage) => void,
     onCompletionEvent?: (message: string) => void,
     onSessionReset?: () => void
@@ -174,6 +175,16 @@ export async function claudeRemote(opts: {
     let nextMessageFetchSeq = 0;
     let streamMessageSeq = 0;
     let resultSeq = 0;
+    let turnStartedAt = Date.now();
+
+    const extractResultDurationMs = (message: SDKMessage): number | null => {
+        const raw = (message as Record<string, unknown>).duration_ms
+            ?? (message as Record<string, unknown>).durationMs;
+        if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
+            return null;
+        }
+        return Math.round(raw);
+    };
 
     const scheduleNextMessage = () => {
         if (nextMessageFetchInFlight || inputEnded) {
@@ -200,6 +211,7 @@ export async function claudeRemote(opts: {
                     return;
                 }
                 mode = next.mode;
+                turnStartedAt = Date.now();
                 messages.push({ type: 'user', message: { role: 'user', content: next.message } });
                 logger.debug(
                     `${debugPrefix} nextMessage resolved fetchId=${fetchId} elapsedMs=${Date.now() - startedAt} ` +
@@ -258,6 +270,10 @@ export async function claudeRemote(opts: {
             if (message.type === 'result') {
                 resultSeq += 1;
                 updateThinking(false);
+                opts.onTurnDuration?.(
+                    extractResultDurationMs(message)
+                    ?? Math.max(0, Date.now() - turnStartedAt)
+                );
                 logger.debug(
                     `${debugPrefix} result #${resultSeq} received; scheduling next user message ` +
                     `(nextInFlight=${nextMessageFetchInFlight}, inputEnded=${inputEnded})`
