@@ -97,6 +97,40 @@ describe('appServerConfig', () => {
         });
     });
 
+    it('passes Codex service tier on thread start without putting it into config', () => {
+        const params = buildThreadStartParams({
+            cwd: '/workspace/project',
+            mode: { permissionMode: 'default', serviceTier: 'fast', collaborationMode: 'default' },
+            mcpServers
+        });
+
+        expect(params.serviceTier).toBe('fast');
+        expect(params.config).toEqual({
+            'mcp_servers.hapi': {
+                command: 'node',
+                args: ['mcp']
+            },
+            developer_instructions: codexSystemPrompt
+        });
+    });
+
+    it('omits standard service tier on thread start', () => {
+        const params = buildThreadStartParams({
+            cwd: '/workspace/project',
+            mode: { permissionMode: 'default', serviceTier: 'standard', collaborationMode: 'default' },
+            mcpServers
+        });
+
+        expect(params.serviceTier).toBeUndefined();
+        expect(params.config).toEqual({
+            'mcp_servers.hapi': {
+                command: 'node',
+                args: ['mcp']
+            },
+            developer_instructions: codexSystemPrompt
+        });
+    });
+
     it('builds turn params with mode defaults', () => {
         const params = buildTurnStartParams({
             threadId: 'thread-1',
@@ -124,6 +158,68 @@ describe('appServerConfig', () => {
             }
         });
         expect(params.model).toBeUndefined();
+    });
+
+    it('passes fast Codex service tier on turn start outside collaboration mode settings', () => {
+        const params = buildTurnStartParams({
+            threadId: 'thread-1',
+            message: 'hello',
+            cwd: '/workspace/project',
+            mode: {
+                permissionMode: 'default',
+                model: 'gpt-5.5',
+                serviceTier: 'fast',
+                collaborationMode: 'default'
+            }
+        });
+
+        expect(params.serviceTier).toBe('fast');
+        expect(params.collaborationMode).toEqual({
+            mode: 'default',
+            settings: {
+                model: 'gpt-5.5',
+                developer_instructions: codexSystemPrompt
+            }
+        });
+    });
+
+    it('omits standard service tier on turn start', () => {
+        const params = buildTurnStartParams({
+            threadId: 'thread-1',
+            message: 'hello',
+            cwd: '/workspace/project',
+            mode: {
+                permissionMode: 'default',
+                model: 'gpt-5.5',
+                serviceTier: 'standard',
+                collaborationMode: 'default'
+            }
+        });
+
+        expect(params.serviceTier).toBeUndefined();
+        expect(params.collaborationMode).toEqual({
+            mode: 'default',
+            settings: {
+                model: 'gpt-5.5',
+                developer_instructions: codexSystemPrompt
+            }
+        });
+    });
+
+    it('passes Codex model reasoning effort as a turn effort', () => {
+        const params = buildTurnStartParams({
+            threadId: 'thread-1',
+            message: 'hello',
+            cwd: '/workspace/project',
+            mode: {
+                permissionMode: 'default',
+                model: 'gpt-5.5',
+                modelReasoningEffort: 'high',
+                collaborationMode: 'default'
+            }
+        });
+
+        expect(params.effort).toBe('high');
     });
 
     it('puts collaboration mode in turn params with model settings', () => {

@@ -698,13 +698,21 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     }
                 }
 
+                const sessionModelReasoningEffort = session.getModelReasoningEffort();
+                const sessionServiceTier = session.getServiceTier();
                 const turnParams = buildTurnStartParams({
                     threadId: this.currentThreadId,
                     message: message.message,
                     cwd: session.path,
                     mode: {
                         ...message.mode,
-                        model: session.getModel() ?? message.mode.model
+                        model: session.getModel() ?? message.mode.model,
+                        modelReasoningEffort: sessionModelReasoningEffort !== undefined
+                            ? ((sessionModelReasoningEffort ?? undefined) as EnhancedMode['modelReasoningEffort'])
+                            : message.mode.modelReasoningEffort,
+                        serviceTier: sessionServiceTier !== undefined
+                            ? ((sessionServiceTier ?? undefined) as EnhancedMode['serviceTier'])
+                            : message.mode.serviceTier
                     },
                     cliOverrides: session.codexCliOverrides
                 });

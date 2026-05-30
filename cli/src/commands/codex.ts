@@ -3,8 +3,8 @@ import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
 import type { CommandDefinition } from './types'
-import { CODEX_PERMISSION_MODES } from '@hapi/protocol/modes'
-import type { CodexPermissionMode } from '@hapi/protocol/types'
+import { CODEX_PERMISSION_MODES, CODEX_SERVICE_TIERS } from '@hapi/protocol/modes'
+import type { CodexPermissionMode, CodexServiceTier } from '@hapi/protocol/types'
 import type { ReasoningEffort } from '@/codex/appServerTypes'
 
 function parseReasoningEffort(value: string): ReasoningEffort {
@@ -35,6 +35,7 @@ export const codexCommand: CommandDefinition = {
                 resumeSessionId?: string
                 model?: string
                 modelReasoningEffort?: ReasoningEffort
+                serviceTier?: CodexServiceTier
             } = {}
             const unknownArgs: string[] = []
             let hasExplicitPermissionMode = false
@@ -75,6 +76,12 @@ export const codexCommand: CommandDefinition = {
                         throw new Error('Missing --model-reasoning-effort value')
                     }
                     options.modelReasoningEffort = parseReasoningEffort(effort)
+                } else if (arg === '--service-tier') {
+                    const serviceTier = commandArgs[++i]
+                    if (!serviceTier || !(CODEX_SERVICE_TIERS as readonly string[]).includes(serviceTier)) {
+                        throw new Error(`Invalid --service-tier value: ${serviceTier ?? '(missing)'}`)
+                    }
+                    options.serviceTier = serviceTier as CodexServiceTier
                 } else {
                     unknownArgs.push(arg)
                 }

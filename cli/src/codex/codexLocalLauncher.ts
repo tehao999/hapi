@@ -1,6 +1,6 @@
 import { logger } from '@/ui/logger';
 import { codexLocal } from './codexLocal';
-import type { ReasoningEffort } from './appServerTypes';
+import type { ReasoningEffort, ServiceTier } from './appServerTypes';
 import { CodexSession } from './session';
 import { createCodexSessionScanner } from './utils/codexSessionScanner';
 import { convertCodexEvent } from './utils/codexEventConverter';
@@ -53,6 +53,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
                 path: session.path,
                 sessionId: resumeSessionId,
                 modelReasoningEffort: (session.getModelReasoningEffort() ?? undefined) as ReasoningEffort | undefined,
+                serviceTier: (session.getServiceTier() ?? undefined) as ServiceTier | undefined,
                 onSessionFound: handleSessionFound,
                 abort: abortSignal,
                 codexArgs,

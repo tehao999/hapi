@@ -89,4 +89,21 @@ describe('buildCliArgs', () => {
         expect(getRunnerAgentEnv('claude', { HOME: '/Users/example' })).toEqual({})
         expect(getRunnerAgentEnv('codex', { HOME: '/Users/example' })).toEqual({})
     })
+
+    it('adds --service-tier for Codex sessions only', () => {
+        const codexArgs = buildCliArgs('codex', {
+            directory: '/tmp',
+            serviceTier: 'fast'
+        })
+        expect(codexArgs).toContain('--service-tier')
+        expect(codexArgs).toContain('fast')
+
+        const claudeArgs = buildCliArgs('claude', {
+            directory: '/tmp',
+            serviceTier: 'fast'
+        })
+        expect(claudeArgs).not.toContain('--service-tier')
+        expect(claudeArgs).not.toContain('fast')
+    })
+
 })

@@ -1,0 +1,164 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mockCodexSession = vi.hoisted(() => {
+    const state: {
+        permissionMode?: string | null;
+        model?: string | null;
+        modelReasoningEffort?: string | null;
+        serviceTier?: string | null;
+        collaborationMode?: string | null;
+    } = {};
+
+    return {
+        state,
+        reset() {
+            state.permissionMode = undefined;
+            state.model = undefined;
+            state.modelReasoningEffort = undefined;
+            state.serviceTier = undefined;
+            state.collaborationMode = undefined;
+        },
+        getPermissionMode: vi.fn(() => state.permissionMode),
+        setPermissionMode: vi.fn((value: string | null) => { state.permissionMode = value; }),
+        getModel: vi.fn(() => state.model),
+        setModel: vi.fn((value: string | null) => { state.model = value; }),
+        getModelReasoningEffort: vi.fn(() => state.modelReasoningEffort),
+        setModelReasoningEffort: vi.fn((value: string | null) => { state.modelReasoningEffort = value; }),
+        getServiceTier: vi.fn(() => state.serviceTier),
+        setServiceTier: vi.fn((value: string | null) => { state.serviceTier = value; }),
+        getCollaborationMode: vi.fn(() => state.collaborationMode),
+        setCollaborationMode: vi.fn((value: string | null) => { state.collaborationMode = value; }),
+        stopKeepAlive: vi.fn()
+    };
+});
+
+const harness = vi.hoisted(() => ({
+    bootstrapArgs: [] as Array<Record<string, unknown>>,
+    loopArgs: [] as Array<Record<string, unknown>>,
+    session: {
+        onUserMessage: vi.fn(),
+        rpcHandlerManager: {
+            registerHandler: vi.fn()
+        }
+    }
+}));
+
+vi.mock('@/agent/sessionFactory', () => ({
+    bootstrapSession: vi.fn(async (options: Record<string, unknown>) => {
+        harness.bootstrapArgs.push(options);
+        return {
+            api: {},
+            session: harness.session
+        };
+    })
+}));
+
+vi.mock('./loop', () => ({
+    loop: vi.fn(async (options: Record<string, unknown>) => {
+        harness.loopArgs.push(options);
+        const onSessionReady = options.onSessionReady as ((session: unknown) => void) | undefined;
+        if (onSessionReady) {
+            onSessionReady(mockCodexSession);
+        }
+    })
+}));
+
+vi.mock('@/claude/registerKillSessionHandler', () => ({
+    registerKillSessionHandler: vi.fn()
+}));
+
+vi.mock('@/agent/runnerLifecycle', () => ({
+    createModeChangeHandler: vi.fn(() => vi.fn()),
+    createRunnerLifecycle: vi.fn(() => ({
+        registerProcessHandlers: vi.fn(),
+        cleanupAndExit: vi.fn(async () => {}),
+        markCrash: vi.fn(),
+        setExitCode: vi.fn(),
+        setArchiveReason: vi.fn()
+    })),
+    setControlledByUser: vi.fn()
+}));
+
+vi.mock('@/ui/logger', () => ({
+    logger: {
+        debug: vi.fn()
+    }
+}));
+
+vi.mock('@/utils/attachmentFormatter', () => ({
+    formatMessageWithAttachments: vi.fn((text: string) => text)
+}));
+
+vi.mock('@/utils/invokedCwd', () => ({
+    getInvokedCwd: vi.fn(() => '/tmp/project')
+}));
+
+import { runCodex } from './runCodex';
+
+describe('runCodex service tier config', () => {
+    beforeEach(() => {
+        harness.bootstrapArgs.length = 0;
+        harness.loopArgs.length = 0;
+        harness.session.onUserMessage.mockReset();
+        harness.session.rpcHandlerManager.registerHandler.mockReset();
+        mockCodexSession.reset();
+        mockCodexSession.getPermissionMode.mockClear();
+        mockCodexSession.setPermissionMode.mockClear();
+        mockCodexSession.getModel.mockClear();
+        mockCodexSession.setModel.mockClear();
+        mockCodexSession.getModelReasoningEffort.mockClear();
+        mockCodexSession.setModelReasoningEffort.mockClear();
+        mockCodexSession.getServiceTier.mockClear();
+        mockCodexSession.setServiceTier.mockClear();
+        mockCodexSession.getCollaborationMode.mockClear();
+        mockCodexSession.setCollaborationMode.mockClear();
+        mockCodexSession.stopKeepAlive.mockClear();
+    });
+
+    it('passes initial service tier through bootstrap and loop', async () => {
+        await runCodex({ serviceTier: 'fast' as never });
+
+        expect(harness.bootstrapArgs[0]?.serviceTier).toBe('fast');
+        expect(harness.loopArgs[0]?.serviceTier).toBe('fast');
+        expect(mockCodexSession.setServiceTier).toHaveBeenLastCalledWith('fast');
+    });
+
+    it('applies service tier via set-session-config after session ready', async () => {
+        await runCodex({});
+
+        const registerCalls = harness.session.rpcHandlerManager.registerHandler.mock.calls;
+        const configHandler = registerCalls.find(
+            (call: unknown[]) => call[0] === 'set-session-config'
+        );
+        expect(configHandler).toBeDefined();
+
+        const handler = configHandler![1] as (payload: unknown) => Promise<unknown>;
+        const result = await handler({ serviceTier: 'fast' }) as Record<string, unknown>;
+        const applied = result.applied as Record<string, unknown>;
+
+        expect(applied.serviceTier).toBe('fast');
+        expect(mockCodexSession.setServiceTier).toHaveBeenLastCalledWith('fast');
+    });
+
+    it('uses updated service tier for the next user turn', async () => {
+        await runCodex({});
+
+        const registerCalls = harness.session.rpcHandlerManager.registerHandler.mock.calls;
+        const configHandler = registerCalls.find(
+            (call: unknown[]) => call[0] === 'set-session-config'
+        );
+        const handler = configHandler![1] as (payload: unknown) => Promise<unknown>;
+        await handler({ modelReasoningEffort: 'high', serviceTier: 'fast' });
+
+        const userMessageHandler = harness.session.onUserMessage.mock.calls[0]?.[0] as (message: unknown) => void;
+        userMessageHandler({
+            content: {
+                text: 'hello'
+            }
+        });
+
+        const queue = harness.loopArgs[0]?.messageQueue as { queue: Array<{ mode: Record<string, unknown> }> };
+        expect(queue.queue[0]?.mode.modelReasoningEffort).toBe('high');
+        expect(queue.queue[0]?.mode.serviceTier).toBe('fast');
+    });
+});

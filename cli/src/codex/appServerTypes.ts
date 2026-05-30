@@ -29,6 +29,7 @@ export interface ThreadStartParams {
     baseInstructions?: string;
     developerInstructions?: string;
     personality?: string;
+    serviceTier?: ServiceTier;
     ephemeral?: boolean;
     experimentalRawEvents?: boolean;
 }
@@ -56,6 +57,7 @@ export interface ThreadResumeParams {
     baseInstructions?: string;
     developerInstructions?: string;
     personality?: string;
+    serviceTier?: ServiceTier;
 }
 
 export interface ThreadResumeResponse {
@@ -103,6 +105,7 @@ export type SandboxPolicy =
 
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type ReasoningSummary = 'auto' | 'none' | 'brief' | 'detailed';
+export type ServiceTier = 'standard' | 'fast';
 
 export type CollaborationMode = {
     mode: 'plan' | 'default';
@@ -120,6 +123,7 @@ export interface TurnStartParams {
     approvalPolicy?: ApprovalPolicy;
     sandboxPolicy?: SandboxPolicy;
     model?: string;
+    serviceTier?: ServiceTier;
     effort?: ReasoningEffort;
     summary?: ReasoningSummary;
     personality?: string;

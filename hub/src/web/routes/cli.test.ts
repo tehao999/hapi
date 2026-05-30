@@ -56,10 +56,10 @@ function createApp(messages: Array<{ id: string; seq: number; createdAt: number;
 
 describe('cli routes', () => {
     it('passes service tier through CLI session registration', async () => {
-        let capturedServiceTier: string | undefined
+        let capturedServiceTier: 'standard' | 'fast' | undefined
         const engine = {
             getOrCreateSession: (...args: unknown[]) => {
-                capturedServiceTier = args[7] as string | undefined
+                capturedServiceTier = args[7] as 'standard' | 'fast' | undefined
                 return createSession({ serviceTier: capturedServiceTier ?? null })
             }
         } as Partial<SyncEngine>
