@@ -20,12 +20,25 @@ const AUTO_APPROVE_TOOL_NAME_HINTS = [
     'change_title',
     'happy__change_title',
     'hapi_change_title',  // OpenCode MCP tool pattern
+    'mcp__hapi__send_attachment',
+    'functions.hapi__send_attachment',
+    'hapi__send_attachment',
+    'hapi_send_attachment',
+    'happy__send_attachment',
     'geminireasoning',
     'codexreasoning',
     'think',
     'save_memory'
 ];
-const AUTO_APPROVE_TOOL_ID_HINTS = ['change_title', 'save_memory'];
+const AUTO_APPROVE_TOOL_ID_HINTS = [
+    'change_title',
+    'mcp__hapi__send_attachment',
+    'functions.hapi__send_attachment',
+    'hapi__send_attachment',
+    'hapi_send_attachment',
+    'happy__send_attachment',
+    'save_memory'
+];
 const AUTO_APPROVE_WRITE_TOOL_HINTS = ['write', 'edit', 'create', 'delete', 'patch', 'fs-edit'];
 
 export function resolveToolAutoApprovalDecision(
