@@ -24,7 +24,7 @@ export { SessionStore } from './sessionStore'
 export { SessionNotificationStateStore } from './sessionNotificationState'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION: number = 8
+const SCHEMA_VERSION: number = 9
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -132,6 +132,7 @@ export class Store {
                 agent_state_version INTEGER DEFAULT 1,
                 model TEXT,
                 model_reasoning_effort TEXT,
+                service_tier TEXT,
                 effort TEXT,
                 todos TEXT,
                 todos_updated_at INTEGER,
@@ -235,6 +236,10 @@ export class Store {
         if (version === 7) {
             this.migrateFromV7ToV8()
             version = 8
+        }
+        if (version === 8) {
+            this.migrateFromV8ToV9()
+            version = 9
         }
         if (version !== SCHEMA_VERSION) {
             throw this.buildSchemaMismatchError(currentVersion)
@@ -375,6 +380,13 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_session_notification_state_namespace
                 ON session_notification_state(namespace, unread_count);
         `)
+    }
+
+    private migrateFromV8ToV9(): void {
+        const columns = this.getSessionColumnNames()
+        if (!columns.has('service_tier')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN service_tier TEXT')
+        }
     }
 
     private getSessionColumnNames(): Set<string> {

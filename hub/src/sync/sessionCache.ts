@@ -1,6 +1,6 @@
 import { CODEX_DESKTOP_SYNC_SOURCE } from '@hapi/protocol'
 import { AgentStateSchema, MetadataSchema, TeamStateSchema } from '@hapi/protocol/schemas'
-import type { CodexCollaborationMode, PermissionMode, Session } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexServiceTier, PermissionMode, Session } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
@@ -72,9 +72,10 @@ export class SessionCache {
         namespace: string,
         model?: string,
         effort?: string,
-        modelReasoningEffort?: string
+        modelReasoningEffort?: string,
+        serviceTier?: string
     ): Session {
-        const stored = this.store.sessions.getOrCreateSession(tag, metadata, agentState, namespace, model, effort, modelReasoningEffort)
+        const stored = this.store.sessions.getOrCreateSession(tag, metadata, agentState, namespace, model, effort, modelReasoningEffort, serviceTier)
         return this.refreshSession(stored.id) ?? (() => { throw new Error('Failed to load session') })()
     }
 
@@ -147,6 +148,7 @@ export class SessionCache {
             teamState,
             model: stored.model,
             modelReasoningEffort: stored.modelReasoningEffort,
+            serviceTier: stored.serviceTier as CodexServiceTier | null,
             effort: stored.effort,
             permissionMode: existing?.permissionMode,
             collaborationMode: existing?.collaborationMode
@@ -172,6 +174,7 @@ export class SessionCache {
         permissionMode?: PermissionMode
         model?: string | null
         modelReasoningEffort?: string | null
+        serviceTier?: CodexServiceTier | null
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
     }): void {
@@ -186,6 +189,7 @@ export class SessionCache {
         const previousPermissionMode = session.permissionMode
         const previousModel = session.model
         const previousModelReasoningEffort = session.modelReasoningEffort
+        const previousServiceTier = session.serviceTier
         const previousEffort = session.effort
         const previousCollaborationMode = session.collaborationMode
 
@@ -212,6 +216,14 @@ export class SessionCache {
             }
             session.modelReasoningEffort = payload.modelReasoningEffort
         }
+        if (payload.serviceTier !== undefined) {
+            if (payload.serviceTier !== session.serviceTier) {
+                this.store.sessions.setSessionServiceTier(payload.sid, payload.serviceTier, session.namespace, {
+                    touchUpdatedAt: false
+                })
+            }
+            session.serviceTier = payload.serviceTier
+        }
         if (payload.effort !== undefined) {
             if (payload.effort !== session.effort) {
                 this.store.sessions.setSessionEffort(payload.sid, payload.effort, session.namespace, {
@@ -229,6 +241,7 @@ export class SessionCache {
         const modeChanged = previousPermissionMode !== session.permissionMode
             || previousModel !== session.model
             || previousModelReasoningEffort !== session.modelReasoningEffort
+            || previousServiceTier !== session.serviceTier
             || previousEffort !== session.effort
             || previousCollaborationMode !== session.collaborationMode
         const shouldBroadcast = (!wasActive && session.active)
@@ -248,6 +261,7 @@ export class SessionCache {
                     permissionMode: session.permissionMode,
                     model: session.model,
                     modelReasoningEffort: session.modelReasoningEffort,
+                    serviceTier: session.serviceTier,
                     effort: session.effort,
                     collaborationMode: session.collaborationMode
                 }
@@ -311,6 +325,7 @@ export class SessionCache {
             permissionMode?: PermissionMode
             model?: string | null
             modelReasoningEffort?: string | null
+            serviceTier?: CodexServiceTier | null
             effort?: string | null
             collaborationMode?: CodexCollaborationMode
         }
@@ -344,6 +359,17 @@ export class SessionCache {
                 }
             }
             session.modelReasoningEffort = config.modelReasoningEffort
+        }
+        if (config.serviceTier !== undefined) {
+            if (config.serviceTier !== session.serviceTier) {
+                const updated = this.store.sessions.setSessionServiceTier(sessionId, config.serviceTier, session.namespace, {
+                    touchUpdatedAt: false
+                })
+                if (!updated) {
+                    throw new Error('Failed to update session service tier')
+                }
+            }
+            session.serviceTier = config.serviceTier
         }
         if (config.effort !== undefined) {
             if (config.effort !== session.effort) {
@@ -500,6 +526,15 @@ export class SessionCache {
             })
             if (!updated) {
                 throw new Error('Failed to preserve session model reasoning effort during merge')
+            }
+        }
+
+        if (newStored.serviceTier === null && oldStored.serviceTier !== null) {
+            const updated = this.store.sessions.setSessionServiceTier(newSessionId, oldStored.serviceTier, namespace, {
+                touchUpdatedAt: false
+            })
+            if (!updated) {
+                throw new Error('Failed to preserve session service tier during merge')
             }
         }
 

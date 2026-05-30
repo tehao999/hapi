@@ -170,6 +170,26 @@ describe('session model', () => {
         expect(store.sessions.getSession(session.id)?.modelReasoningEffort).toBe('xhigh')
     })
 
+    it('persists explicit service tier on Codex sessions', () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const session = cache.getOrCreateSession(
+            'session-service-tier',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default',
+            'gpt-5.5',
+            undefined,
+            'xhigh',
+            'fast'
+        )
+
+        expect(session.serviceTier).toBe('fast')
+        expect(store.sessions.getSession(session.id)?.serviceTier).toBe('fast')
+    })
+
     it('preserves model from old session when merging into resumed session', async () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []
@@ -288,6 +308,31 @@ describe('session model', () => {
         expect(store.sessions.getSession(session.id)?.modelReasoningEffort).toBeNull()
     })
 
+    it('persists applied session service tier updates, including clear-to-default', () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const session = cache.getOrCreateSession(
+            'session-service-tier-config',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default',
+            'gpt-5.5',
+            undefined,
+            undefined,
+            'standard'
+        )
+
+        cache.applySessionConfig(session.id, { serviceTier: 'fast' })
+        expect(cache.getSession(session.id)?.serviceTier).toBe('fast')
+        expect(store.sessions.getSession(session.id)?.serviceTier).toBe('fast')
+
+        cache.applySessionConfig(session.id, { serviceTier: null })
+        expect(cache.getSession(session.id)?.serviceTier).toBeNull()
+        expect(store.sessions.getSession(session.id)?.serviceTier).toBeNull()
+    })
+
     it('persists keepalive effort changes, including clearing the effort', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []
@@ -337,6 +382,33 @@ describe('session model', () => {
 
         expect(cache.getSession(session.id)?.modelReasoningEffort).toBeNull()
         expect(store.sessions.getSession(session.id)?.modelReasoningEffort).toBeNull()
+    })
+
+    it('persists keepalive service tier changes, including clearing the value', () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const session = cache.getOrCreateSession(
+            'session-service-tier-heartbeat',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default',
+            'gpt-5.5',
+            undefined,
+            undefined,
+            'fast'
+        )
+
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now(),
+            thinking: false,
+            serviceTier: null
+        })
+
+        expect(cache.getSession(session.id)?.serviceTier).toBeNull()
+        expect(store.sessions.getSession(session.id)?.serviceTier).toBeNull()
     })
 
     it('tracks collaboration mode updates in memory from config and keepalive', () => {
