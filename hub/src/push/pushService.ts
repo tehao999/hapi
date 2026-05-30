@@ -45,18 +45,9 @@ function getErrorStatusCode(error: unknown): number | null {
         : null
 }
 
-function getErrorCode(error: unknown): string | null {
-    return typeof (error as { code?: unknown }).code === 'string'
-        ? (error as { code: string }).code
-        : null
-}
-
 function isPermanentPushFailure(error: unknown): boolean {
     const statusCode = getErrorStatusCode(error)
-    const errorCode = getErrorCode(error)
-    return statusCode === 404
-        || statusCode === 410
-        || errorCode === 'UNKNOWN_CERTIFICATE_VERIFICATION_ERROR'
+    return statusCode === 404 || statusCode === 410
 }
 
 export class PushService {

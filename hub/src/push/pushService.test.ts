@@ -51,14 +51,17 @@ describe('PushService failed subscription handling', () => {
         expect(removed).toEqual(['default:https://web.push.apple.com/stale'])
     })
 
-    it('removes subscriptions that fail with permanent TLS certificate errors', async () => {
+    it('does not remove subscriptions for TLS certificate transport errors', async () => {
         const { store, removed } = createStore()
         spyOn(webPush, 'sendNotification').mockRejectedValue(createError({ code: 'UNKNOWN_CERTIFICATE_VERIFICATION_ERROR' }))
+        const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
         const service = new PushService(vapidKeys, 'mailto:test@example.com', store)
 
         await service.sendToNamespace('default', { title: 't', body: 'b' })
 
-        expect(removed).toEqual(['default:https://web.push.apple.com/stale'])
+        expect(removed).toEqual([])
+        expect(errorSpy).toHaveBeenCalledTimes(1)
+        errorSpy.mockRestore()
     })
 
     it('removes subscriptions after repeated transient failures', async () => {
