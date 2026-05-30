@@ -56,6 +56,32 @@ function createAbortError(): Error {
     return error;
 }
 
+export function buildCodexAppServerArgs(
+    env: Record<string, string | undefined> = process.env
+): string[] {
+    const args = ['app-server'];
+    const rawAutoCompactLimit = env.HAPI_CODEX_AUTO_COMPACT_TOKEN_LIMIT;
+
+    if (rawAutoCompactLimit === undefined) {
+        return args;
+    }
+
+    if (!/^[1-9][0-9]*$/.test(rawAutoCompactLimit)) {
+        throw new Error('HAPI_CODEX_AUTO_COMPACT_TOKEN_LIMIT must be a positive integer');
+    }
+
+    const autoCompactLimit = Number(rawAutoCompactLimit);
+    if (
+        !Number.isSafeInteger(autoCompactLimit) ||
+        autoCompactLimit <= 0
+    ) {
+        throw new Error('HAPI_CODEX_AUTO_COMPACT_TOKEN_LIMIT must be a positive integer');
+    }
+
+    args.push('-c', `model_auto_compact_token_limit=${autoCompactLimit}`);
+    return args;
+}
+
 export class CodexAppServerClient {
     private process: ChildProcessWithoutNullStreams | null = null;
     private connected = false;
@@ -73,7 +99,7 @@ export class CodexAppServerClient {
             return;
         }
 
-        this.process = spawn('codex', ['app-server'], {
+        this.process = spawn('codex', buildCodexAppServerArgs(), {
             env: Object.keys(process.env).reduce((acc, key) => {
                 const value = process.env[key];
                 if (typeof value === 'string') acc[key] = value;
