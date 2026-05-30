@@ -17,6 +17,7 @@ import { registerAppServerPermissionHandlers } from './utils/appServerPermission
 import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerConfig';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
 import { createCodexThreadTitlePoller, syncCodexThreadTitleToMetadata } from './utils/codexThreadTitle';
+import { compactToolOutputForHapi } from './utils/toolOutputCompaction';
 import {
     RemoteLauncherBase,
     type RemoteLauncherDisplayContext,
@@ -255,6 +256,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let clearReadyAfterTurnTimer: (() => void) | null = null;
         let turnInFlight = false;
         let allowAnonymousTerminalEvent = false;
+        const mcpToolNamesByCallId = new Map<string, string>();
 
         const handleCodexEvent = (msg: Record<string, unknown>) => {
             const msgType = asString(msg.type);
@@ -426,7 +428,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     session.sendAgentMessage({
                         type: 'tool-call-result',
                         callId: callId,
-                        output,
+                        output: compactToolOutputForHapi(output, {
+                            callId,
+                            toolName: 'CodexBash'
+                        }),
                         id: randomUUID()
                     });
                 }
@@ -475,11 +480,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     session.sendAgentMessage({
                         type: 'tool-call-result',
                         callId: callId,
-                        output: {
+                        output: compactToolOutputForHapi({
                             stdout,
                             stderr,
                             success
-                        },
+                        }, {
+                            callId,
+                            toolName: 'CodexPatch'
+                        }),
                         id: randomUUID()
                     });
                 }
@@ -492,6 +500,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     invocation.tool ?? invocation.tool_name ?? msg.tool
                 );
                 if (callId && name) {
+                    mcpToolNamesByCallId.set(callId, name);
                     session.sendAgentMessage({
                         type: 'tool-call',
                         name,
@@ -517,13 +526,18 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 }
 
                 if (callId) {
+                    const toolName = mcpToolNamesByCallId.get(callId) ?? 'mcp';
                     session.sendAgentMessage({
                         type: 'tool-call-result',
                         callId,
-                        output,
+                        output: compactToolOutputForHapi(output, {
+                            callId,
+                            toolName
+                        }),
                         is_error: isError,
                         id: randomUUID()
                     });
+                    mcpToolNamesByCallId.delete(callId);
                 }
             }
             if (msgType === 'turn_diff') {

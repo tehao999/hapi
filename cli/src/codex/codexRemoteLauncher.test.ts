@@ -8,7 +8,9 @@ const harness = vi.hoisted(() => ({
     initializeCalls: [] as unknown[],
     turnCompletion: { status: 'Completed' } as { status: string; message?: string },
     titleSyncCalls: [] as string[],
-    emitContextCompactionBeforeCompletion: false
+    emitContextCompactionBeforeCompletion: false,
+    emitLargeToolOutputBeforeCompletion: false,
+    emitLargeMcpOutputBeforeCompletion: false
 }));
 
 vi.mock('./codexAppServerClient', () => {
@@ -51,6 +53,45 @@ vi.mock('./codexAppServerClient', () => {
                 };
                 harness.notifications.push({ method: 'thread/compacted', params: compacted });
                 this.notificationHandler?.('thread/compacted', compacted);
+            }
+
+            if (harness.emitLargeToolOutputBeforeCompletion) {
+                const completedCommand = {
+                    item: {
+                        type: 'commandExecution',
+                        id: 'cmd-large',
+                        output: `head\n${'x'.repeat(25_000)}\ntail`,
+                        exitCode: 0,
+                        status: 'completed'
+                    }
+                };
+                harness.notifications.push({ method: 'item/completed', params: completedCommand });
+                this.notificationHandler?.('item/completed', completedCommand);
+            }
+
+            if (harness.emitLargeMcpOutputBeforeCompletion) {
+                const startedMcp = {
+                    msg: {
+                        type: 'mcp_tool_call_begin',
+                        call_id: 'mcp-large',
+                        invocation: {
+                            server: 'browser',
+                            tool: 'open',
+                            arguments: { url: 'http://localhost' }
+                        }
+                    }
+                };
+                const completedMcp = {
+                    msg: {
+                        type: 'mcp_tool_call_end',
+                        call_id: 'mcp-large',
+                        result: { Ok: `head\n${'m'.repeat(25_000)}\ntail` }
+                    }
+                };
+                harness.notifications.push({ method: 'codex/event/mcp_tool_call_begin', params: startedMcp });
+                this.notificationHandler?.('codex/event/mcp_tool_call_begin', startedMcp);
+                harness.notifications.push({ method: 'codex/event/mcp_tool_call_end', params: completedMcp });
+                this.notificationHandler?.('codex/event/mcp_tool_call_end', completedMcp);
             }
 
             const completed = { ...harness.turnCompletion, turn: {} };
@@ -209,6 +250,8 @@ describe('codexRemoteLauncher', () => {
         harness.turnCompletion = { status: 'Completed' };
         harness.titleSyncCalls = [];
         harness.emitContextCompactionBeforeCompletion = false;
+        harness.emitLargeToolOutputBeforeCompletion = false;
+        harness.emitLargeMcpOutputBeforeCompletion = false;
     });
 
     it('finishes a turn and emits ready when task lifecycle events omit turn_id', async () => {
@@ -283,6 +326,51 @@ describe('codexRemoteLauncher', () => {
             tokens: 25000
         }));
         expect(sessionEvents.filter((event) => event.type === 'ready')).toHaveLength(1);
+    });
+
+    it('summarizes oversized command outputs before sending them to HAPI', async () => {
+        harness.emitLargeToolOutputBeforeCompletion = true;
+        const {
+            session,
+            codexMessages
+        } = createSessionStub();
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'tool-call-result',
+            callId: 'cmd-large',
+            output: expect.objectContaining({
+                type: 'hapi-tool-output-summary',
+                truncated: true,
+                callId: 'cmd-large',
+                toolName: 'CodexBash',
+                preview: expect.stringContaining('head')
+            })
+        }));
+    });
+
+    it('keeps MCP tool identity when summarizing oversized MCP outputs', async () => {
+        harness.emitLargeMcpOutputBeforeCompletion = true;
+        const {
+            session,
+            codexMessages
+        } = createSessionStub();
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'tool-call-result',
+            callId: 'mcp-large',
+            output: expect.objectContaining({
+                type: 'hapi-tool-output-summary',
+                truncated: true,
+                callId: 'mcp-large',
+                toolName: 'mcp__browser__open'
+            })
+        }));
     });
 
     it('exits after an idle desktop-mirror takeover turn instead of waiting forever for more messages', async () => {
