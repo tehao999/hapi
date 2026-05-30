@@ -274,6 +274,38 @@ describe('listMentions', () => {
         }])
     })
 
+    it('does not read plugin manifests that are symlinks outside the plugin installation directory', async () => {
+        await writePluginConfig(homeDir, [
+            '[plugins."github@openai-curated"]',
+            'enabled = true',
+        ])
+        const pluginJson = join(homeDir, '.codex', 'plugins', 'cache', 'openai-curated', 'github', '1.0.0', '.codex-plugin', 'plugin.json')
+        const outsidePluginJson = join(sandboxDir, 'outside-plugin.json')
+        await writePluginManifest(
+            homeDir,
+            'openai-curated',
+            'github',
+            '1.0.0',
+            'Safe GitHub plugin'
+        )
+        await rm(pluginJson)
+        await writeFile(outsidePluginJson, JSON.stringify({
+            name: 'github',
+            description: 'Escaped GitHub plugin',
+            apps: './.app.json'
+        }, null, 2))
+        await symlink(outsidePluginJson, pluginJson)
+
+        await expect(listMentions({ agent: 'codex' })).resolves.toEqual([{
+            name: 'github',
+            label: '@github',
+            insertText: '@github',
+            description: undefined,
+            kind: 'plugin',
+            pluginName: 'github',
+        }])
+    })
+
     it('does not read app manifests that are symlinks outside the plugin installation directory', async () => {
         await writePluginConfig(homeDir, [
             '[plugins."github@openai-curated"]',

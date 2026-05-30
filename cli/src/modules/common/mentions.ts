@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { listEnabledCodexPluginInstallations, resolveRealFileInside } from './codexPlugins'
 
 export interface MentionSummary {
@@ -50,7 +49,8 @@ export async function listMentions(request: ListMentionsRequest = {}): Promise<M
 
     const installations = await listEnabledCodexPluginInstallations()
     const mentionEntries = await Promise.all(installations.map(async (installation) => {
-        const manifest = await readJsonFile<PluginManifest>(join(installation.installPath, '.codex-plugin', 'plugin.json'))
+        const manifestPath = await resolveRealFileInside(installation.installPath, '.codex-plugin', 'plugin.json')
+        const manifest = manifestPath ? await readJsonFile<PluginManifest>(manifestPath) : null
         const description = manifest?.description
         const appManifestPath = typeof manifest?.apps === 'string'
             ? await resolveRealFileInside(installation.installPath, manifest.apps)
