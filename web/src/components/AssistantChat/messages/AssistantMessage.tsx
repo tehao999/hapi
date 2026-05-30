@@ -2,6 +2,7 @@ import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
 import { MarkdownText } from '@/components/assistant-ui/markdown-text'
 import { Reasoning, ReasoningGroup } from '@/components/assistant-ui/reasoning'
 import { HappyToolMessage } from '@/components/AssistantChat/messages/ToolMessage'
+import { MessageAttachments } from '@/components/AssistantChat/messages/MessageAttachments'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
@@ -39,6 +40,12 @@ export function HappyAssistantMessage() {
         if (message.role !== 'assistant') return ''
         return getAssistantCopyText(message.content)
     })
+    const attachments = useAssistantState(({ message }) => {
+        if (message.role !== 'assistant') return undefined
+        const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+        return custom?.attachments
+    })
+    const hasAttachments = Boolean(attachments && attachments.length > 0)
     const rootClass = toolOnly
         ? 'py-1 min-w-0 max-w-full overflow-x-hidden'
         : 'px-1 min-w-0 max-w-full overflow-x-hidden'
@@ -55,6 +62,7 @@ export function HappyAssistantMessage() {
         <MessagePrimitive.Root className={`${rootClass} ${copyText ? 'group/msg' : ''}`}>
             <div className="min-w-0">
                 <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />
+                {hasAttachments && <MessageAttachments attachments={attachments!} />}
             </div>
             {copyText && (
                 <div className="hidden sm:flex justify-end mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity">

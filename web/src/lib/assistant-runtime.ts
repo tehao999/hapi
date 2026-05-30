@@ -65,6 +65,22 @@ function toThreadMessageLike(block: ToolDisplayBlock): ThreadMessageLike {
         }
     }
 
+    if (block.kind === 'agent-attachments') {
+        const messageId = `assistant:${block.id}`
+        return {
+            role: 'assistant',
+            id: messageId,
+            createdAt: new Date(block.createdAt),
+            content: [{ type: 'text', text: '' }],
+            metadata: {
+                custom: {
+                    kind: 'assistant',
+                    attachments: block.attachments
+                } satisfies HappyChatMessageMetadata
+            }
+        }
+    }
+
     if (block.kind === 'agent-event') {
         const messageId = `event:${block.id}`
         return {

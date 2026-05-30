@@ -173,6 +173,18 @@ export function reduceTimeline(
                     continue
                 }
 
+                if (c.type === 'attachments') {
+                    blocks.push({
+                        kind: 'agent-attachments',
+                        id: `${msg.id}:${idx}`,
+                        localId: msg.localId,
+                        createdAt: msg.createdAt,
+                        attachments: c.attachments,
+                        meta: msg.meta
+                    })
+                    continue
+                }
+
                 if (c.type === 'tool-call') {
                     if (isChangeTitleToolName(c.name)) {
                         const title = context.titleChangesByToolUseId.get(c.id) ?? extractTitleFromChangeTitleInput(c.input)

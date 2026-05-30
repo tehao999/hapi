@@ -1,4 +1,5 @@
 import type {
+    AgentAttachmentsBlock,
     AgentEvent,
     AgentEventBlock,
     AgentReasoningBlock,
@@ -127,6 +128,13 @@ function areAgentReasoningBlocksEqual(left: AgentReasoningBlock, right: AgentRea
         && left.meta === right.meta
 }
 
+function areAgentAttachmentsBlocksEqual(left: AgentAttachmentsBlock, right: AgentAttachmentsBlock): boolean {
+    return left.attachments === right.attachments
+        && left.localId === right.localId
+        && left.createdAt === right.createdAt
+        && left.meta === right.meta
+}
+
 function areCliOutputBlocksEqual(left: CliOutputBlock, right: CliOutputBlock): boolean {
     return left.text === right.text
         && left.localId === right.localId
@@ -211,6 +219,11 @@ function reconcileBlock(block: ChatBlock, prevById: ChatBlocksById): ChatBlock {
     if (block.kind === 'agent-reasoning') {
         const prevBlock = prev as AgentReasoningBlock
         return areAgentReasoningBlocksEqual(prevBlock, block) ? prevBlock : block
+    }
+
+    if (block.kind === 'agent-attachments') {
+        const prevBlock = prev as AgentAttachmentsBlock
+        return areAgentAttachmentsBlocksEqual(prevBlock, block) ? prevBlock : block
     }
 
     const prevBlock = prev as AgentEventBlock

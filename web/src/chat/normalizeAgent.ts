@@ -1,6 +1,33 @@
 import type { AgentEvent, NormalizedAgentContent, NormalizedMessage, ToolResultPermission } from '@/chat/types'
+import type { AttachmentMetadata } from '@/types/api'
 import { AGENT_MESSAGE_PAYLOAD_TYPE, asNumber, asString, isObject } from '@hapi/protocol'
 import { isClaudeChatVisibleMessage } from '@hapi/protocol/messages'
+import { getSafeAttachmentPreviewUrl } from '@/lib/safeAttachmentPreviewUrl'
+
+function parseAttachments(raw: unknown): AttachmentMetadata[] | undefined {
+    if (!Array.isArray(raw)) return undefined
+    const attachments: AttachmentMetadata[] = []
+    for (const item of raw) {
+        if (
+            isObject(item) &&
+            typeof item.id === 'string' &&
+            typeof item.filename === 'string' &&
+            typeof item.mimeType === 'string' &&
+            typeof item.size === 'number' &&
+            typeof item.path === 'string'
+        ) {
+            attachments.push({
+                id: item.id,
+                filename: item.filename,
+                mimeType: item.mimeType,
+                size: item.size,
+                path: item.path,
+                previewUrl: getSafeAttachmentPreviewUrl(item.previewUrl)
+            })
+        }
+    }
+    return attachments.length > 0 ? attachments : undefined
+}
 
 function normalizeToolResultPermissions(value: unknown): ToolResultPermission | undefined {
     if (!isObject(value)) return undefined
@@ -412,6 +439,20 @@ export function normalizeAgentRecord(
                     uuid,
                     parentUUID: null
                 }],
+                meta
+            }
+        }
+
+        if (data.type === 'attachments') {
+            const attachments = parseAttachments(data.attachments)
+            if (!attachments) return null
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'agent',
+                isSidechain: false,
+                content: [{ type: 'attachments', attachments }],
                 meta
             }
         }

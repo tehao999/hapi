@@ -66,6 +66,7 @@ export type NormalizedAgentContent =
     | ToolResult
     | { type: 'summary'; summary: string }
     | { type: 'sidechain'; uuid: string; parentUUID: string | null; prompt: string }
+    | { type: 'attachments'; attachments: AttachmentMetadata[] }
 
 export type NormalizedMessage = ({
     role: 'user'
@@ -143,6 +144,15 @@ export type AgentReasoningBlock = {
     meta?: unknown
 }
 
+export type AgentAttachmentsBlock = {
+    kind: 'agent-attachments'
+    id: string
+    localId: string | null
+    createdAt: number
+    attachments: AttachmentMetadata[]
+    meta?: unknown
+}
+
 export type CliOutputBlock = {
     kind: 'cli-output'
     id: string
@@ -171,4 +181,4 @@ export type ToolCallBlock = {
     meta?: unknown
 }
 
-export type ChatBlock = UserTextBlock | AgentTextBlock | AgentReasoningBlock | CliOutputBlock | ToolCallBlock | AgentEventBlock
+export type ChatBlock = UserTextBlock | AgentTextBlock | AgentReasoningBlock | AgentAttachmentsBlock | CliOutputBlock | ToolCallBlock | AgentEventBlock
