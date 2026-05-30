@@ -131,13 +131,15 @@ describe('claudeRemote async message handling', () => {
             onSessionReset: () => {}
         });
 
-        await waitFor(() => received.length >= 3);
-        expect(received.map((m) => m.type)).toEqual(['assistant', 'result', 'assistant']);
-
         try {
+            await waitFor(() => received.length >= 3, 2_000);
+            expect(received.map((m) => m.type)).toEqual(['assistant', 'result', 'assistant']);
+
             pendingNext.resolve(null);
             await runPromise;
         } finally {
+            pendingNext.resolve(null);
+            await runPromise.catch(() => undefined);
             queryMock.mockReset();
             querySpy.mockRestore();
         }
