@@ -7,6 +7,7 @@ import {
     PermissionModeSchema,
     TodosSchema
 } from '@hapi/protocol/schemas'
+import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import type { CodexCollaborationMode, CodexServiceTier, PermissionMode } from '@hapi/protocol/types'
 import { z } from 'zod'
 import { UsageSchema } from '@/claude/types'
@@ -156,10 +157,16 @@ export type UserMessage = z.infer<typeof UserMessageSchema>
 
 export const AgentMessageSchema = z.object({
     role: z.literal('agent'),
-    content: z.object({
-        type: z.literal('output'),
-        data: z.unknown()
-    }),
+    content: z.union([
+        z.object({
+            type: z.literal('output'),
+            data: z.unknown()
+        }),
+        z.object({
+            type: z.literal(AGENT_MESSAGE_PAYLOAD_TYPE),
+            data: z.unknown()
+        })
+    ]),
     meta: MessageMetaSchema.optional()
 })
 
