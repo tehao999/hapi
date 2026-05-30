@@ -25,6 +25,8 @@ export type {
     CodexCollaborationMode,
     CodexCollaborationModeOption,
     CodexPermissionMode,
+    CodexServiceTier,
+    CodexServiceTierOption,
     CursorPermissionMode,
     GeminiPermissionMode,
     OpencodePermissionMode,

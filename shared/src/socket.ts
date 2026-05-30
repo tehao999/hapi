@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { CodexCollaborationMode, PermissionMode } from './modes'
+import type { CodexCollaborationMode, CodexServiceTier, PermissionMode } from './modes'
 
 export type SocketErrorReason = 'namespace-missing' | 'access-denied' | 'not-found'
 
@@ -154,6 +154,7 @@ export interface ClientToServerEvents {
         permissionMode?: PermissionMode
         model?: string | null
         modelReasoningEffort?: string | null
+        serviceTier?: CodexServiceTier | null
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
     }) => void

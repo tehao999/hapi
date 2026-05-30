@@ -1,8 +1,9 @@
 import { z } from 'zod'
-import { CODEX_COLLABORATION_MODES, PERMISSION_MODES } from './modes'
+import { CODEX_COLLABORATION_MODES, CODEX_SERVICE_TIERS, PERMISSION_MODES } from './modes'
 
 export const PermissionModeSchema = z.enum(PERMISSION_MODES)
 export const CodexCollaborationModeSchema = z.enum(CODEX_COLLABORATION_MODES)
+export const CodexServiceTierSchema = z.enum(CODEX_SERVICE_TIERS)
 
 const MetadataSummarySchema = z.object({
     text: z.string(),
@@ -193,6 +194,7 @@ export const SessionSchema = z.object({
     teamState: TeamStateSchema.optional(),
     model: z.string().nullable().optional().default(null),
     modelReasoningEffort: z.string().nullable().optional().default(null),
+    serviceTier: CodexServiceTierSchema.nullable().optional(),
     effort: z.string().nullable().optional().default(null),
     permissionMode: PermissionModeSchema.optional(),
     collaborationMode: CodexCollaborationModeSchema.optional()

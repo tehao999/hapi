@@ -14,6 +14,9 @@ export type CodexPermissionMode = typeof CODEX_PERMISSION_MODES[number]
 export const CODEX_COLLABORATION_MODES = ['default', 'plan'] as const
 export type CodexCollaborationMode = typeof CODEX_COLLABORATION_MODES[number]
 
+export const CODEX_SERVICE_TIERS = ['standard', 'fast'] as const
+export type CodexServiceTier = typeof CODEX_SERVICE_TIERS[number]
+
 export const GEMINI_PERMISSION_MODES = ['default', 'read-only', 'safe-yolo', 'yolo'] as const
 export type GeminiPermissionMode = typeof GEMINI_PERMISSION_MODES[number]
 
@@ -72,9 +75,19 @@ export type CodexCollaborationModeOption = {
     label: string
 }
 
+export type CodexServiceTierOption = {
+    tier: CodexServiceTier
+    label: string
+}
+
 export const CODEX_COLLABORATION_MODE_LABELS: Record<CodexCollaborationMode, string> = {
     default: 'Default',
     plan: 'Plan'
+}
+
+export const CODEX_SERVICE_TIER_LABELS: Record<CodexServiceTier, string> = {
+    standard: 'Standard',
+    fast: 'Fast'
 }
 
 export function getPermissionModeLabel(mode: PermissionMode): string {
@@ -87,6 +100,10 @@ export function getPermissionModeTone(mode: PermissionMode): PermissionModeTone 
 
 export function getCodexCollaborationModeLabel(mode: CodexCollaborationMode): string {
     return CODEX_COLLABORATION_MODE_LABELS[mode]
+}
+
+export function getCodexServiceTierLabel(tier: CodexServiceTier): string {
+    return CODEX_SERVICE_TIER_LABELS[tier]
 }
 
 export function getPermissionModesForFlavor(flavor?: string | null): readonly PermissionMode[] {
@@ -121,5 +138,12 @@ export function getCodexCollaborationModeOptions(): CodexCollaborationModeOption
     return CODEX_COLLABORATION_MODES.map((mode) => ({
         mode,
         label: getCodexCollaborationModeLabel(mode)
+    }))
+}
+
+export function getCodexServiceTierOptions(): CodexServiceTierOption[] {
+    return CODEX_SERVICE_TIERS.map((tier) => ({
+        tier,
+        label: getCodexServiceTierLabel(tier)
     }))
 }
