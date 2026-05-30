@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
+import { CodexServiceTierSchema } from '@hapi/protocol/schemas'
 import { configuration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
@@ -14,6 +15,7 @@ const createOrLoadSessionSchema = z.object({
     agentState: z.unknown().nullable().optional(),
     model: z.string().optional(),
     modelReasoningEffort: z.string().optional(),
+    serviceTier: CodexServiceTierSchema.optional(),
     effort: z.string().optional()
 })
 
@@ -133,7 +135,8 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             namespace,
             parsed.data.model,
             parsed.data.effort,
-            parsed.data.modelReasoningEffort
+            parsed.data.modelReasoningEffort,
+            parsed.data.serviceTier
         )
         return c.json({ session })
     })

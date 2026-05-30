@@ -9,7 +9,7 @@ import {
 import type { ClientToServerEvents, SyncMessageAck } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexServiceTier, PermissionMode } from '@hapi/protocol/types'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import { shouldAcceptPassiveSync } from '../../../sync/sessionControlService'
@@ -30,6 +30,7 @@ type SessionAlivePayload = {
     permissionMode?: PermissionMode
     model?: string | null
     modelReasoningEffort?: string | null
+    serviceTier?: CodexServiceTier | null
     effort?: string | null
     collaborationMode?: CodexCollaborationMode
 }

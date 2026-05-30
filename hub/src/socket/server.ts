@@ -10,6 +10,7 @@ import { registerCliHandlers } from './handlers/cli'
 import { registerTerminalHandlers } from './handlers/terminal'
 import { RpcRegistry } from './rpcRegistry'
 import type { SyncEvent } from '../sync/syncEngine'
+import type { CodexServiceTier } from '@hapi/protocol/types'
 import { TerminalRegistry } from './terminalRegistry'
 import type { CliSocketWithData, SocketData, SocketServer } from './socketTypes'
 
@@ -36,7 +37,7 @@ export type SocketServerDeps = {
     corsOrigins?: string[]
     getSession?: (sessionId: string) => { active: boolean; namespace: string } | null
     onWebappEvent?: (event: SyncEvent) => void
-    onSessionAlive?: (payload: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync'; generation?: number; thinking?: boolean; mode?: 'local' | 'remote' }) => void
+    onSessionAlive?: (payload: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync'; generation?: number; thinking?: boolean; mode?: 'local' | 'remote'; serviceTier?: CodexServiceTier | null }) => void
     onSessionEnd?: (payload: { sid: string; time: number; source?: 'cli' | 'codex-desktop-sync'; generation?: number }) => void
     onMachineAlive?: (payload: { machineId: string; time: number }) => void
     onBackgroundTaskDelta?: (sessionId: string, delta: { started: number; completed: number }) => void

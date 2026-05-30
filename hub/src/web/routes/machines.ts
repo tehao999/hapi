@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { CodexServiceTierSchema } from '@hapi/protocol/schemas'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireMachine } from './guards'
@@ -10,6 +11,7 @@ const spawnBodySchema = z.object({
     model: z.string().optional(),
     effort: z.string().optional(),
     modelReasoningEffort: z.string().optional(),
+    serviceTier: CodexServiceTierSchema.optional(),
     yolo: z.boolean().optional(),
     sessionType: z.enum(['simple', 'worktree']).optional(),
     worktreeName: z.string().optional()
@@ -66,7 +68,9 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             parsed.data.sessionType,
             parsed.data.worktreeName,
             undefined,
-            parsed.data.effort
+            parsed.data.effort,
+            undefined,
+            parsed.data.serviceTier
         )
         return c.json(result)
     })

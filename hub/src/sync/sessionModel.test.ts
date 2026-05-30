@@ -555,6 +555,69 @@ describe('session model', () => {
         }
     })
 
+    it('passes the stored service tier when respawning a resumed Codex session', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const session = engine.getOrCreateSession(
+                'session-service-tier-resume',
+                {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    machineId: 'machine-1',
+                    flavor: 'codex',
+                    codexSessionId: 'codex-thread-1'
+                },
+                null,
+                'default',
+                'gpt-5.5',
+                undefined,
+                undefined,
+                'fast'
+            )
+            engine.getOrCreateMachine(
+                'machine-1',
+                { host: 'localhost', platform: 'linux', happyCliVersion: '0.1.0' },
+                null,
+                'default'
+            )
+            engine.handleMachineAlive({ machineId: 'machine-1', time: Date.now() })
+
+            let capturedServiceTier: string | undefined
+            ;(engine as any).rpcGateway.spawnSession = async (
+                _machineId: string,
+                _directory: string,
+                _agent: string,
+                _model?: string,
+                _modelReasoningEffort?: string,
+                _yolo?: boolean,
+                _sessionType?: string,
+                _worktreeName?: string,
+                _resumeSessionId?: string,
+                _effort?: string,
+                _permissionMode?: string,
+                serviceTier?: string
+            ) => {
+                capturedServiceTier = serviceTier
+                return { type: 'success', sessionId: session.id }
+            }
+            ;(engine as any).waitForSessionActive = async () => true
+
+            const result = await engine.resumeSession(session.id, 'default')
+
+            expect(result).toEqual({ type: 'success', sessionId: session.id })
+            expect(capturedServiceTier).toBe('fast')
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('passes resume session ID to rpc gateway when resuming claude session', async () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(
@@ -1472,6 +1535,79 @@ describe('session model', () => {
             runnerSessionId: 'runner-session-2',
             updatedAt: 8
         })
+    })
+
+
+    it('rejects session config when the active CLI returns an old model reasoning effort', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const session = engine.getOrCreateSession(
+                'session-config-stale-reasoning-effort',
+                { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+                null,
+                'default',
+                'gpt-5.5',
+                undefined,
+                'xhigh'
+            )
+            ;(engine as unknown as {
+                rpcGateway: { requestSessionConfig: () => Promise<unknown> }
+            }).rpcGateway = {
+                requestSessionConfig: async () => ({
+                    applied: { modelReasoningEffort: 'xhigh' }
+                })
+            }
+
+            await expect(engine.applySessionConfig(session.id, { modelReasoningEffort: 'high' }))
+                .rejects.toThrow('Session config was not applied')
+            expect(store.sessions.getSession(session.id)?.modelReasoningEffort).toBe('xhigh')
+        } finally {
+            engine.stop()
+        }
+    })
+
+
+    it('rejects session config when the active CLI omits requested service tier', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const session = engine.getOrCreateSession(
+                'session-config-stale-service-tier',
+                { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+                null,
+                'default',
+                'gpt-5.5',
+                undefined,
+                undefined,
+                'standard'
+            )
+            ;(engine as unknown as {
+                rpcGateway: { requestSessionConfig: () => Promise<unknown> }
+            }).rpcGateway = {
+                requestSessionConfig: async () => ({
+                    applied: {}
+                })
+            }
+
+            await expect(engine.applySessionConfig(session.id, { serviceTier: 'fast' }))
+                .rejects.toThrow('Session config was not applied')
+            expect(store.sessions.getSession(session.id)?.serviceTier).toBe('standard')
+        } finally {
+            engine.stop()
+        }
     })
 
 })

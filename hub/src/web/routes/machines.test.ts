@@ -68,6 +68,41 @@ describe('machines routes', () => {
         })
     })
 
+    it('passes service tier when spawning a Codex session', async () => {
+        let capturedServiceTier: string | undefined
+        const machines = [createMachine({ id: 'machine-1', active: true })]
+        const engine = {
+            getMachine: (machineId: string) => machines.find((machine) => machine.id === machineId),
+            getMachinesByNamespace: (namespace: string) => machines.filter((machine) => machine.namespace === namespace),
+            getOnlineMachinesByNamespace: (namespace: string) => machines.filter((machine) => machine.namespace === namespace && machine.active),
+            spawnSession: async (...args: unknown[]) => {
+                capturedServiceTier = args[11] as string | undefined
+                return { type: 'success' as const, sessionId: 'session-codex-fast' }
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/spawn', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                directory: '/tmp/project',
+                agent: 'codex',
+                serviceTier: 'fast'
+            })
+        })
+
+        expect(response.status).toBe(200)
+        expect(capturedServiceTier).toBe('fast')
+        expect(await response.json()).toEqual({ type: 'success', sessionId: 'session-codex-fast' })
+    })
+
     it('accepts CC-deepseek as a spawn agent', async () => {
         let capturedAgent: string | undefined
         const machines = [createMachine({ id: 'machine-1', active: true })]

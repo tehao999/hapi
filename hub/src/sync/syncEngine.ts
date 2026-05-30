@@ -8,7 +8,7 @@
  */
 
 import { CODEX_DESKTOP_SYNC_SOURCE, getExecutionControl, isCodexDesktopMirrorSession } from '@hapi/protocol'
-import type { CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexServiceTier, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import type { Server } from 'socket.io'
 import type { Store } from '../store'
 import type { RpcRegistry } from '../socket/rpcRegistry'
@@ -47,6 +47,32 @@ export type ResumeSessionResult =
 type TakeoverSessionResult =
     | { type: 'success'; sessionId: string }
     | { type: 'error'; message: string; code: 'access_denied' | 'session_not_found' | 'resume_unavailable' | 'resume_failed' | 'no_machine_online' | 'takeover_busy' }
+
+function formatSessionConfigValue(value: unknown): string {
+    return value === undefined ? 'missing' : JSON.stringify(value)
+}
+
+function assertCodexSessionConfigApplied(
+    config: {
+        modelReasoningEffort?: string | null
+        serviceTier?: CodexServiceTier | null
+    },
+    applied: {
+        modelReasoningEffort?: Session['modelReasoningEffort']
+        serviceTier?: Session['serviceTier']
+    }
+): void {
+    for (const key of ['modelReasoningEffort', 'serviceTier'] as const) {
+        if (config[key] === undefined) {
+            continue
+        }
+        if (applied[key] !== config[key]) {
+            throw new Error(
+                `Session config was not applied by the running agent (${key}: requested ${formatSessionConfigValue(config[key])}, got ${formatSessionConfigValue(applied[key])}). Restart or resume this session to load the latest HAPI CLI.`
+            )
+        }
+    }
+}
 
 export function isIgnorableKillSessionError(error: unknown): boolean {
     if (!(error instanceof Error)) {
@@ -235,6 +261,7 @@ export class SyncEngine {
         permissionMode?: PermissionMode
         model?: string | null
         modelReasoningEffort?: string | null
+        serviceTier?: CodexServiceTier | null
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
     }): void {
@@ -324,9 +351,10 @@ export class SyncEngine {
         namespace: string,
         model?: string,
         effort?: string,
-        modelReasoningEffort?: string
+        modelReasoningEffort?: string,
+        serviceTier?: CodexServiceTier
     ): Session {
-        return this.sessionCache.getOrCreateSession(tag, metadata, agentState, namespace, model, effort, modelReasoningEffort)
+        return this.sessionCache.getOrCreateSession(tag, metadata, agentState, namespace, model, effort, modelReasoningEffort, serviceTier)
     }
 
     getOrCreateMachine(id: string, metadata: unknown, runnerState: unknown, namespace: string): Machine {
@@ -405,6 +433,7 @@ export class SyncEngine {
             permissionMode?: PermissionMode
             model?: string | null
             modelReasoningEffort?: string | null
+            serviceTier?: CodexServiceTier | null
             effort?: string | null
             collaborationMode?: CodexCollaborationMode
         }
@@ -418,6 +447,7 @@ export class SyncEngine {
                 permissionMode?: Session['permissionMode']
                 model?: Session['model']
                 modelReasoningEffort?: Session['modelReasoningEffort']
+                serviceTier?: Session['serviceTier']
                 effort?: Session['effort']
                 collaborationMode?: Session['collaborationMode']
             }
@@ -427,6 +457,7 @@ export class SyncEngine {
             throw new Error('Missing applied session config')
         }
 
+        assertCodexSessionConfigApplied(config, applied)
         this.sessionCache.applySessionConfig(sessionId, applied)
     }
 
@@ -441,7 +472,8 @@ export class SyncEngine {
         worktreeName?: string,
         resumeSessionId?: string,
         effort?: string,
-        permissionMode?: PermissionMode
+        permissionMode?: PermissionMode,
+        serviceTier?: CodexServiceTier
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         return await this.rpcGateway.spawnSession(
             machineId,
@@ -454,7 +486,8 @@ export class SyncEngine {
             worktreeName,
             resumeSessionId,
             effort,
-            permissionMode
+            permissionMode,
+            serviceTier
         )
     }
 
@@ -614,7 +647,8 @@ export class SyncEngine {
             undefined,
             resumeToken,
             session.effort ?? undefined,
-            session.permissionMode ?? undefined
+            session.permissionMode ?? undefined,
+            session.serviceTier ?? undefined
         )
 
         if (spawnResult.type !== 'success') {

@@ -1,4 +1,4 @@
-import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexServiceTier, PermissionMode } from '@hapi/protocol/types'
 import type { Server } from 'socket.io'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 
@@ -95,6 +95,7 @@ export class RpcGateway {
             permissionMode?: PermissionMode
             model?: string | null
             modelReasoningEffort?: string | null
+            serviceTier?: CodexServiceTier | null
             effort?: string | null
             collaborationMode?: CodexCollaborationMode
         }
@@ -117,13 +118,14 @@ export class RpcGateway {
         worktreeName?: string,
         resumeSessionId?: string,
         effort?: string,
-        permissionMode?: PermissionMode
+        permissionMode?: PermissionMode,
+        serviceTier?: CodexServiceTier
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         try {
             const result = await this.machineRpc(
                 machineId,
                 'spawn-happy-session',
-                { type: 'spawn-in-directory', directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, resumeSessionId, effort, permissionMode }
+                { type: 'spawn-in-directory', directory, agent, model, modelReasoningEffort, serviceTier, yolo, sessionType, worktreeName, resumeSessionId, effort, permissionMode }
             )
             if (result && typeof result === 'object') {
                 const obj = result as Record<string, unknown>

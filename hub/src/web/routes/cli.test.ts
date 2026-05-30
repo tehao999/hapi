@@ -55,6 +55,58 @@ function createApp(messages: Array<{ id: string; seq: number; createdAt: number;
 }
 
 describe('cli routes', () => {
+    it('passes service tier through CLI session registration', async () => {
+        let capturedServiceTier: string | undefined
+        const engine = {
+            getOrCreateSession: (...args: unknown[]) => {
+                capturedServiceTier = args[7] as string | undefined
+                return createSession({ serviceTier: capturedServiceTier ?? null })
+            }
+        } as Partial<SyncEngine>
+        const app = new Hono()
+        app.route('/cli', createCliRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/cli/sessions', {
+            method: 'POST',
+            headers: {
+                authorization: 'Bearer test-cli-token',
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                tag: 'session-1',
+                metadata: { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+                serviceTier: 'fast'
+            })
+        })
+
+        expect(response.status).toBe(200)
+        expect(capturedServiceTier).toBe('fast')
+    })
+
+    it('rejects invalid CLI service tier values', async () => {
+        const engine = {
+            getOrCreateSession: () => createSession()
+        } as Partial<SyncEngine>
+        const app = new Hono()
+        app.route('/cli', createCliRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/cli/sessions', {
+            method: 'POST',
+            headers: {
+                authorization: 'Bearer test-cli-token',
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                tag: 'session-1',
+                metadata: { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+                serviceTier: 'default'
+            })
+        })
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({ error: 'Invalid body' })
+    })
+
     it('filters passive codex sync messages from CLI backfill by localId prefix', async () => {
         const app = createApp([
             {

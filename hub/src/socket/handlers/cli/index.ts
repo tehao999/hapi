@@ -1,4 +1,4 @@
-import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexServiceTier, PermissionMode } from '@hapi/protocol/types'
 import type { Store, StoredMachine, StoredSession } from '../../../store'
 import type { RpcRegistry } from '../../rpcRegistry'
 import type { SyncEvent } from '../../../sync/syncEngine'
@@ -20,6 +20,7 @@ type SessionAlivePayload = {
     permissionMode?: PermissionMode
     model?: string | null
     modelReasoningEffort?: string | null
+    serviceTier?: CodexServiceTier | null
     effort?: string | null
     collaborationMode?: CodexCollaborationMode
 }
