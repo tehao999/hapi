@@ -22,9 +22,16 @@ const sendMessageBodySchema = z.object({
     attachments: z.array(AttachmentMetadataSchema).optional()
 })
 
+function sessionStartStatus(code: string): 403 | 404 | 409 | 503 | 500 {
+    if (code === 'access_denied') return 403
+    if (code === 'session_not_found') return 404
+    if (code === 'no_machine_online') return 503
+    if (code === 'takeover_busy' || code === 'resume_unavailable') return 409
+    return 500
+}
+
 export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
-
 
     app.get('/sessions/:id/recent-user-messages', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
@@ -72,25 +79,9 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        const sessionResult = requireSessionFromParam(c, engine)
         if (sessionResult instanceof Response) {
             return sessionResult
-        }
-        const sessionId = sessionResult.sessionId
-        const recentMessages = engine.getMessagesPage(sessionId, { limit: 50, beforeSeq: null }).messages
-        const control = getExecutionControl(sessionResult.session.metadata)
-
-        if (
-            isCodexDesktopMirrorSession({
-                metadata: sessionResult.session.metadata,
-                messages: recentMessages
-            })
-            && control?.owner !== 'hapi-runner'
-        ) {
-            return c.json({
-                error: 'Desktop-synced sessions must be taken over before sending from HAPI.',
-                code: 'desktop_takeover_required'
-            }, 409)
         }
 
         const body = await c.req.json().catch(() => null)
@@ -104,7 +95,36 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Message requires text or attachments' }, 400)
         }
 
-        await engine.sendMessage(sessionId, {
+        const sessionId = sessionResult.sessionId
+        let targetSessionId = sessionId
+        const recentMessages = engine.getMessagesPage(sessionId, { limit: 50, beforeSeq: null }).messages
+        const control = getExecutionControl(sessionResult.session.metadata)
+        const isDesktopMirror = isCodexDesktopMirrorSession({
+            metadata: sessionResult.session.metadata,
+            messages: recentMessages
+        })
+
+        if (isDesktopMirror && control?.owner !== 'hapi-runner') {
+            const takeover = await engine.takeoverSession(sessionId, c.get('namespace'))
+            if (takeover.type === 'error') {
+                return c.json({
+                    error: takeover.message,
+                    code: takeover.code
+                }, sessionStartStatus(takeover.code))
+            }
+            targetSessionId = takeover.sessionId
+        } else if (!sessionResult.session.active) {
+            const resume = await engine.resumeSession(sessionId, c.get('namespace'))
+            if (resume.type === 'error') {
+                return c.json({
+                    error: resume.message,
+                    code: resume.code
+                }, sessionStartStatus(resume.code))
+            }
+            targetSessionId = resume.sessionId
+        }
+
+        await engine.sendMessage(targetSessionId, {
             text: parsed.data.text,
             localId: parsed.data.localId,
             attachments: parsed.data.attachments,
