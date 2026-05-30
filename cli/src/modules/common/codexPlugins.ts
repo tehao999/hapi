@@ -84,7 +84,7 @@ async function resolveRealPathInside(basePath: string, targetPath: string): Prom
     return targetRealPath
 }
 
-async function resolveRealDirectoryInside(basePath: string, targetPath: string): Promise<string | null> {
+export async function resolveRealDirectoryInside(basePath: string, targetPath: string): Promise<string | null> {
     const realPath = await resolveRealPathInside(basePath, targetPath)
     if (!realPath) {
         return null

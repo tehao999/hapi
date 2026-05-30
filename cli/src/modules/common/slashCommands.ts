@@ -2,6 +2,7 @@ import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
+import { listEnabledCodexPluginInstallations, resolveRealDirectoryInside } from './codexPlugins';
 
 export interface SlashCommand {
     name: string;
@@ -32,7 +33,9 @@ const BUILTIN_COMMANDS: Record<string, SlashCommand[]> = {
         { name: 'cost', description: 'Show session cost', source: 'builtin' },
         { name: 'plan', description: 'Toggle plan mode', source: 'builtin' },
     ],
-    codex: [],
+    codex: [
+        { name: 'compact', description: 'Compact conversation context', source: 'builtin' },
+    ],
     gemini: [
         { name: 'about', description: 'About Gemini', source: 'builtin' },
         { name: 'clear', description: 'Clear conversation', source: 'builtin' },
@@ -217,7 +220,24 @@ async function scanProjectCommands(agent: string, projectDir?: string): Promise<
  * then scans each plugin's commands directory.
  */
 async function scanPluginCommands(agent: string): Promise<SlashCommand[]> {
-    // Only Claude supports plugins for now
+    if (agent === 'codex') {
+        const installations = await listEnabledCodexPluginInstallations();
+        const allCommands: SlashCommand[] = [];
+
+        for (const installation of installations) {
+            const commandsPath = join(installation.installPath, 'commands');
+            const commandsDir = await resolveRealDirectoryInside(installation.installPath, commandsPath);
+            if (!commandsDir) {
+                continue;
+            }
+            const commands = await scanCommandsDir(commandsDir, 'plugin', installation.pluginName);
+            allCommands.push(...commands);
+        }
+
+        return allCommands.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    // Only Claude supports Claude-style plugins for now
     if (agent !== 'claude') {
         return [];
     }
