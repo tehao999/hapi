@@ -24,6 +24,7 @@ export type SessionSummary = {
     pendingRequestsCount: number
     unreadCount: number
     model: string | null
+    serviceTier?: string | null
     effort: string | null
 }
 
@@ -64,6 +65,7 @@ export function toSessionSummary(session: Session, options?: { unreadCount?: num
         pendingRequestsCount,
         unreadCount: options?.unreadCount ?? 0,
         model: session.model,
+        serviceTier: session.serviceTier ?? null,
         effort: session.effort
     }
 }

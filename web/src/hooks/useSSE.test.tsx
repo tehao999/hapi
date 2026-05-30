@@ -137,4 +137,44 @@ describe('useSSE', () => {
         expect(cached?.session.serviceTier).toBe('fast')
     })
 
+    it('applies serviceTier session patches to cached session summaries', () => {
+        vi.stubGlobal('EventSource', FakeEventSource)
+        const { queryClient, wrapper } = createHarness()
+        queryClient.setQueryData(queryKeys.sessions, {
+            sessions: [{
+                id: 'session-1',
+                active: true,
+                thinking: false,
+                activeAt: 1,
+                updatedAt: 1,
+                metadata: { path: '/repo', flavor: 'codex' },
+                todoProgress: null,
+                pendingRequestsCount: 0,
+                unreadCount: 0,
+                model: null,
+                effort: null,
+                serviceTier: null
+            }]
+        })
+
+        renderHook(() => useSSE({
+            enabled: true,
+            token: 'token',
+            baseUrl: 'http://localhost:3000',
+            subscription: { sessionId: 'session-1' },
+            onEvent: vi.fn()
+        }), { wrapper })
+
+        act(() => {
+            FakeEventSource.instances[0]!.emit({
+                type: 'session-updated',
+                sessionId: 'session-1',
+                data: { serviceTier: 'fast' }
+            })
+        })
+
+        const cached = queryClient.getQueryData<{ sessions: Array<{ serviceTier?: string | null }> }>(queryKeys.sessions)
+        expect(cached?.sessions[0]?.serviceTier).toBe('fast')
+    })
+
 })

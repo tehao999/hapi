@@ -417,6 +417,7 @@ export function useSSE(options: {
                     activeAt: patch.activeAt ?? current.activeAt,
                     updatedAt: patch.updatedAt ?? current.updatedAt,
                     model: Object.prototype.hasOwnProperty.call(patch, 'model') ? patch.model ?? null : current.model,
+                    serviceTier: Object.prototype.hasOwnProperty.call(patch, 'serviceTier') ? patch.serviceTier ?? null : current.serviceTier ?? null,
                     effort: Object.prototype.hasOwnProperty.call(patch, 'effort') ? patch.effort ?? null : current.effort
                 }
 
