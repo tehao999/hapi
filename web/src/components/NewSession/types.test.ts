@@ -3,20 +3,18 @@ import { describe, expect, it } from 'vitest'
 import { CLAUDE_EFFORT_OPTIONS, MODEL_OPTIONS } from './types'
 
 describe('Claude model options', () => {
-    it('includes 1m model options in the expected order', () => {
+    it('matches the concise local Claude Code model menu', () => {
         expect(MODEL_OPTIONS.claude).toEqual([
-            { value: 'auto', label: 'Auto' },
-            { value: 'opus', label: 'Opus' },
-            { value: 'opus[1m]', label: 'Opus 1M' },
-            { value: 'sonnet', label: 'Sonnet' },
-            { value: 'sonnet[1m]', label: 'Sonnet 1M' },
+            { value: 'auto', label: 'Opus 4.8 · 1M' },
+            { value: 'sonnet', label: 'Sonnet 4.6 · 200K' },
+            { value: 'haiku', label: 'Haiku 4.5 · 200K' },
         ])
     })
 
     it('exposes friendly labels for Claude model presets', () => {
-        expect(CLAUDE_MODEL_PRESETS).toEqual(['sonnet', 'sonnet[1m]', 'opus', 'opus[1m]'])
-        expect(getClaudeModelLabel('sonnet[1m]')).toBe('Sonnet 1M')
-        expect(getClaudeModelLabel('opus[1m]')).toBe('Opus 1M')
+        expect(CLAUDE_MODEL_PRESETS).toEqual(['sonnet', 'haiku'])
+        expect(getClaudeModelLabel('sonnet')).toBe('Sonnet 4.6 · 200K')
+        expect(getClaudeModelLabel('haiku')).toBe('Haiku 4.5 · 200K')
     })
 })
 

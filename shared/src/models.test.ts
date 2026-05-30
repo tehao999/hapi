@@ -17,7 +17,8 @@ describe('isClaudeModelPreset', () => {
     })
 
     test('rejects unknown model string', () => {
-        expect(isClaudeModelPreset('haiku')).toBe(false)
+        expect(isClaudeModelPreset('opus')).toBe(false)
+        expect(isClaudeModelPreset('haiku-3-5')).toBe(false)
     })
 
     test('rejects null and undefined', () => {
@@ -28,17 +29,16 @@ describe('isClaudeModelPreset', () => {
 
 describe('getClaudeModelLabel', () => {
     test('returns label for known presets', () => {
-        expect(getClaudeModelLabel('sonnet')).toBe('Sonnet')
-        expect(getClaudeModelLabel('opus')).toBe('Opus')
-        expect(getClaudeModelLabel('opus[1m]')).toBe('Opus 1M')
+        expect(getClaudeModelLabel('sonnet')).toBe('Sonnet 4.6 · 200K')
+        expect(getClaudeModelLabel('haiku')).toBe('Haiku 4.5 · 200K')
     })
 
     test('trims whitespace before lookup', () => {
-        expect(getClaudeModelLabel('  sonnet  ')).toBe('Sonnet')
+        expect(getClaudeModelLabel('  sonnet  ')).toBe('Sonnet 4.6 · 200K')
     })
 
     test('returns null for unknown model', () => {
-        expect(getClaudeModelLabel('haiku')).toBeNull()
+        expect(getClaudeModelLabel('haiku-3-5')).toBeNull()
     })
 
     test('returns null for empty/whitespace-only string', () => {

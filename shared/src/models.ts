@@ -1,12 +1,16 @@
+export const DEFAULT_CLAUDE_MODEL_LABEL = 'Opus 4.8 · 1M'
+
 export const CLAUDE_MODEL_LABELS = {
-    sonnet: 'Sonnet',
-    'sonnet[1m]': 'Sonnet 1M',
-    opus: 'Opus',
-    'opus[1m]': 'Opus 1M'
+    sonnet: 'Sonnet 4.6 · 200K',
+    haiku: 'Haiku 4.5 · 200K',
+    opus: DEFAULT_CLAUDE_MODEL_LABEL,
+    'opus[1m]': DEFAULT_CLAUDE_MODEL_LABEL,
+    'sonnet[1m]': 'Sonnet · 1M'
 } as const
 
-export type ClaudeModelPreset = keyof typeof CLAUDE_MODEL_LABELS
-export const CLAUDE_MODEL_PRESETS = Object.keys(CLAUDE_MODEL_LABELS) as ClaudeModelPreset[]
+export const CLAUDE_MODEL_PRESETS = ['sonnet', 'haiku'] as const
+export type ClaudeModelPreset = typeof CLAUDE_MODEL_PRESETS[number]
+const CLAUDE_MODEL_PRESET_SET = new Set<string>(CLAUDE_MODEL_PRESETS)
 
 export const GEMINI_MODEL_LABELS = {
     'gemini-3.1-pro-preview': 'Gemini 3.1 Pro Preview',
@@ -21,7 +25,7 @@ export const GEMINI_MODEL_PRESETS = Object.keys(GEMINI_MODEL_LABELS) as GeminiMo
 export const DEFAULT_GEMINI_MODEL: GeminiModelPreset = 'gemini-2.5-pro'
 
 export function isClaudeModelPreset(model: string | null | undefined): model is ClaudeModelPreset {
-    return typeof model === 'string' && Object.hasOwn(CLAUDE_MODEL_LABELS, model)
+    return typeof model === 'string' && CLAUDE_MODEL_PRESET_SET.has(model)
 }
 
 export function getClaudeModelLabel(model: string): string | null {

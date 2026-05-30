@@ -1,4 +1,10 @@
-import { GEMINI_MODEL_PRESETS, GEMINI_MODEL_LABELS } from '@hapi/protocol'
+import {
+    CLAUDE_MODEL_PRESETS,
+    DEFAULT_CLAUDE_MODEL_LABEL,
+    GEMINI_MODEL_PRESETS,
+    GEMINI_MODEL_LABELS,
+    getClaudeModelLabel,
+} from '@hapi/protocol'
 
 export type AgentType = 'claude' | 'claude-deepseek' | 'codex' | 'cursor' | 'gemini' | 'opencode'
 export type SessionType = 'simple' | 'worktree'
@@ -7,11 +13,8 @@ export type ClaudeEffort = 'auto' | 'medium' | 'high' | 'max'
 
 export const MODEL_OPTIONS: Record<AgentType, { value: string; label: string }[]> = {
     claude: [
-        { value: 'auto', label: 'Auto' },
-        { value: 'opus', label: 'Opus' },
-        { value: 'opus[1m]', label: 'Opus 1M' },
-        { value: 'sonnet', label: 'Sonnet' },
-        { value: 'sonnet[1m]', label: 'Sonnet 1M' },
+        { value: 'auto', label: DEFAULT_CLAUDE_MODEL_LABEL },
+        ...CLAUDE_MODEL_PRESETS.map(m => ({ value: m, label: getClaudeModelLabel(m) ?? m })),
     ],
     'claude-deepseek': [],
     codex: [

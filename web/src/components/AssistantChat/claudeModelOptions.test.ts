@@ -4,22 +4,18 @@ import { getClaudeComposerModelOptions, getNextClaudeComposerModel } from './cla
 describe('getClaudeComposerModelOptions', () => {
     it('includes the active non-preset Claude model in the options list', () => {
         expect(getClaudeComposerModelOptions('claude-opus-4-1-20250805')).toEqual([
-            { value: null, label: 'Auto' },
+            { value: null, label: 'Opus 4.8 · 1M' },
             { value: 'claude-opus-4-1-20250805', label: 'claude-opus-4-1-20250805' },
-            { value: 'sonnet', label: 'Sonnet' },
-            { value: 'sonnet[1m]', label: 'Sonnet 1M' },
-            { value: 'opus', label: 'Opus' },
-            { value: 'opus[1m]', label: 'Opus 1M' },
+            { value: 'sonnet', label: 'Sonnet 4.6 · 200K' },
+            { value: 'haiku', label: 'Haiku 4.5 · 200K' },
         ])
     })
 
     it('does not duplicate preset Claude models', () => {
-        expect(getClaudeComposerModelOptions('opus')).toEqual([
-            { value: null, label: 'Auto' },
-            { value: 'sonnet', label: 'Sonnet' },
-            { value: 'sonnet[1m]', label: 'Sonnet 1M' },
-            { value: 'opus', label: 'Opus' },
-            { value: 'opus[1m]', label: 'Opus 1M' },
+        expect(getClaudeComposerModelOptions('haiku')).toEqual([
+            { value: null, label: 'Opus 4.8 · 1M' },
+            { value: 'sonnet', label: 'Sonnet 4.6 · 200K' },
+            { value: 'haiku', label: 'Haiku 4.5 · 200K' },
         ])
     })
 })
