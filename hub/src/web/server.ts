@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { logger } from 'hono/logger'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { serveStatic } from 'hono/bun'
@@ -27,6 +26,74 @@ import type { WebSocketData } from '@socket.io/bun-engine'
 import { loadEmbeddedAssetMap, type EmbeddedWebAsset } from './embeddedAssets'
 import { isBunCompiled } from '../utils/bunCompiled'
 import type { Store } from '../store'
+import type { MiddlewareHandler } from 'hono'
+
+const SENSITIVE_QUERY_KEYS = new Set(['token', 'accesstoken', 'authorization', 'auth'])
+const STATIC_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+const STATIC_FALLBACK_CACHE_CONTROL = 'no-cache'
+
+function elapsed(start: number): string {
+    const delta = Date.now() - start
+    return delta < 1000 ? `${delta}ms` : `${Math.round(delta / 1000)}s`
+}
+
+function decodeQueryKey(rawKey: string): string {
+    try {
+        return decodeURIComponent(rawKey.replace(/\+/g, ' '))
+    } catch {
+        return rawKey
+    }
+}
+
+export function sanitizeRequestLogPath(path: string): string {
+    const queryIndex = path.indexOf('?')
+    if (queryIndex === -1) {
+        return path
+    }
+
+    const pathname = path.slice(0, queryIndex)
+    const query = path.slice(queryIndex + 1)
+    if (query.length === 0) {
+        return path
+    }
+
+    const sanitized = query
+        .split('&')
+        .map((part) => {
+            if (part.length === 0) {
+                return part
+            }
+            const equalsIndex = part.indexOf('=')
+            const rawKey = equalsIndex === -1 ? part : part.slice(0, equalsIndex)
+            const key = decodeQueryKey(rawKey).toLowerCase()
+            if (!SENSITIVE_QUERY_KEYS.has(key)) {
+                return part
+            }
+            return `${rawKey}=[REDACTED]`
+        })
+        .join('&')
+    return `${pathname}?${sanitized}`
+}
+
+function requestLogger(log: (line: string) => void = console.log): MiddlewareHandler {
+    return async (c, next) => {
+        const { method, url } = c.req
+        const rawPath = url.slice(url.indexOf('/', 8))
+        const path = sanitizeRequestLogPath(rawPath)
+        log(`<-- ${method} ${path}`)
+        const start = Date.now()
+        await next()
+        log(`--> ${method} ${path} ${c.res.status} ${elapsed(start)}`)
+    }
+}
+
+function setStaticCacheHeaders(path: string, c: { header: (name: string, value: string) => void }): void {
+    if (path.includes('/assets/')) {
+        c.header('Cache-Control', STATIC_ASSET_CACHE_CONTROL)
+        return
+    }
+    c.header('Cache-Control', STATIC_FALLBACK_CACHE_CONTROL)
+}
 
 function findWebappDistDir(): { distDir: string; indexHtmlPath: string } {
     const candidates = [
@@ -49,7 +116,10 @@ function findWebappDistDir(): { distDir: string; indexHtmlPath: string } {
 function serveEmbeddedAsset(asset: EmbeddedWebAsset): Response {
     return new Response(Bun.file(asset.sourcePath), {
         headers: {
-            'Content-Type': asset.mimeType
+            'Content-Type': asset.mimeType,
+            'Cache-Control': asset.path.includes('/assets/')
+                ? STATIC_ASSET_CACHE_CONTROL
+                : STATIC_FALLBACK_CACHE_CONTROL
         }
     })
 }
@@ -68,7 +138,7 @@ function createWebApp(options: {
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
-    app.use('*', logger())
+    app.use('*', requestLogger())
 
     // Health check endpoint (no auth required)
     app.get('/health', (c) => c.json({ status: 'ok', protocolVersion: PROTOCOL_VERSION }))
@@ -178,7 +248,10 @@ from GitHub Pages instead of through the relay tunnel.
         return app
     }
 
-    app.use('/assets/*', serveStatic({ root: distDir }))
+    app.use('/assets/*', serveStatic({
+        root: distDir,
+        onFound: (path, c) => setStaticCacheHeaders(path, c)
+    }))
 
     app.use('*', async (c, next) => {
         if (c.req.path.startsWith('/api')) {
@@ -186,7 +259,10 @@ from GitHub Pages instead of through the relay tunnel.
             return
         }
 
-        return await serveStatic({ root: distDir })(c, next)
+        return await serveStatic({
+            root: distDir,
+            onFound: (path, ctx) => setStaticCacheHeaders(path, ctx)
+        })(c, next)
     })
 
     app.get('*', async (c, next) => {
@@ -195,7 +271,11 @@ from GitHub Pages instead of through the relay tunnel.
             return
         }
 
-        return await serveStatic({ root: distDir, path: 'index.html' })(c, next)
+        return await serveStatic({
+            root: distDir,
+            path: 'index.html',
+            onFound: (path, ctx) => setStaticCacheHeaders(path, ctx)
+        })(c, next)
     })
 
     return app
