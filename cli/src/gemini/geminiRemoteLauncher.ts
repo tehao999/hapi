@@ -10,6 +10,7 @@ import type { PermissionMode } from './types';
 import { createGeminiBackend } from './utils/geminiBackend';
 import { GeminiPermissionHandler } from './utils/permissionHandler';
 import { resolveGeminiRuntimeConfig } from './utils/config';
+import { TITLE_INSTRUCTION } from './utils/systemPrompt';
 
 class GeminiRemoteLauncher extends RemoteLauncherBase {
     private readonly session: GeminiSession;
@@ -21,6 +22,7 @@ class GeminiRemoteLauncher extends RemoteLauncherBase {
     private abortController = new AbortController();
     private displayModel: string | null = null;
     private displayPermissionMode: PermissionMode | null = null;
+    private instructionsSent = false;
 
     constructor(session: GeminiSession, opts: { model?: string; hookSettingsPath?: string }) {
         super(process.env.DEBUG ? session.logPath : undefined);
@@ -125,12 +127,19 @@ class GeminiRemoteLauncher extends RemoteLauncherBase {
             this.applyDisplayMode(batch.mode.permissionMode, batch.mode.model);
             messageBuffer.addMessage(batch.message, 'user');
 
+            let messageText = batch.message;
+            if (!this.instructionsSent) {
+                messageText = `${TITLE_INSTRUCTION}\n\n${batch.message}`;
+                this.instructionsSent = true;
+            }
+
             const promptContent: PromptContent[] = [{
                 type: 'text',
-                text: batch.message
+                text: messageText
             }];
 
             session.onThinkingChange(true);
+            const turnStartedAt = Date.now();
 
             try {
                 await backend.prompt(acpSessionId, promptContent, (message: AgentMessage) => {
@@ -145,6 +154,10 @@ class GeminiRemoteLauncher extends RemoteLauncherBase {
                 });
                 messageBuffer.addMessage(`Gemini prompt failed: ${errorMessage}`, 'status');
             } finally {
+                session.sendSessionEvent({
+                    type: 'turn-duration',
+                    durationMs: Math.max(0, Date.now() - turnStartedAt)
+                });
                 session.onThinkingChange(false);
                 await this.permissionHandler?.cancelAll('Prompt finished');
                 if (session.queue.size() === 0 && !this.shouldExit) {
