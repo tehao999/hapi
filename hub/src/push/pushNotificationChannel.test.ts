@@ -132,4 +132,18 @@ describe('PushNotificationChannel', () => {
         expect(push.sent[0]?.payload.data?.unreadCount).toBe(3)
         expect(push.sent[0]?.payload.data?.totalUnreadCount).toBe(8)
     })
+
+    it('uses a unique ready notification tag for each completed turn', async () => {
+        const { channel, push } = createChannel()
+        const session = createSession()
+
+        await channel.sendReady(session)
+        await channel.sendReady(session)
+
+        const firstTag = push.sent[0]?.payload.tag
+        const secondTag = push.sent[1]?.payload.tag
+        expect(firstTag).toStartWith('ready-session-1-')
+        expect(secondTag).toStartWith('ready-session-1-')
+        expect(secondTag).not.toBe(firstTag)
+    })
 })

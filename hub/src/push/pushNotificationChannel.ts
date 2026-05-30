@@ -6,6 +6,8 @@ import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { PushPayload, PushService } from './pushService'
 
 export class PushNotificationChannel implements NotificationChannel {
+    private notificationSequence = 0
+
     constructor(
         private readonly pushService: PushService,
         private readonly sseManager: SSEManager,
@@ -51,7 +53,7 @@ export class PushNotificationChannel implements NotificationChannel {
         const payload: PushPayload = {
             title: this.withUnreadCount('Ready for input', context),
             body: `${agentName} is waiting in ${name}`,
-            tag: `ready-${session.id}`,
+            tag: this.buildReadyNotificationTag(session.id),
             data: {
                 type: 'ready',
                 sessionId: session.id,
@@ -106,6 +108,11 @@ export class PushNotificationChannel implements NotificationChannel {
 
     private buildSessionPath(sessionId: string): string {
         return `/sessions/${sessionId}`
+    }
+
+    private buildReadyNotificationTag(sessionId: string): string {
+        this.notificationSequence += 1
+        return `ready-${sessionId}-${Date.now()}-${this.notificationSequence}`
     }
 
     private withUnreadCount(title: string, context?: NotificationContext): string {
