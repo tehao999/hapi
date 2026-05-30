@@ -5,6 +5,17 @@ type ConvertedEvent = {
     [key: string]: unknown;
 };
 
+const BENIGN_NOTIFICATION_METHODS = new Set([
+    'thread/status/changed',
+    'serverRequest/resolved',
+    'item/commandExecution/terminalInteraction',
+    'skills/changed'
+]);
+
+const BENIGN_ITEM_TYPES = new Set([
+    'usermessage'
+]);
+
 function asRecord(value: unknown): Record<string, unknown> | null {
     if (!value || typeof value !== 'object') {
         return null;
@@ -74,6 +85,26 @@ function extractChanges(value: unknown): Record<string, unknown> | null {
     }
 
     return null;
+}
+
+function contextCompactedEvent(source: Record<string, unknown>, threadSource: Record<string, unknown> = source): ConvertedEvent {
+    const event: ConvertedEvent = { type: 'context_compacted' };
+    const threadId = asString(threadSource.threadId ?? threadSource.thread_id ?? threadSource.id);
+    const turnId = asString(source.turnId ?? source.turn_id);
+    const previousTokens = asNumber(
+        source.previousTokens ??
+        source.previous_tokens ??
+        source.previousTokenCount ??
+        source.previous_token_count
+    );
+    const tokens = asNumber(source.tokens ?? source.tokenCount ?? source.token_count);
+
+    if (threadId) event.thread_id = threadId;
+    if (turnId) event.turn_id = turnId;
+    if (previousTokens !== null) event.previousTokens = previousTokens;
+    if (tokens !== null) event.tokens = tokens;
+
+    return event;
 }
 
 function extractTextFromContent(value: unknown): string | null {
@@ -211,6 +242,10 @@ export class AppServerEventConverter {
             return [];
         }
 
+        if (msgType === 'context_compacted') {
+            return [contextCompactedEvent(msg)];
+        }
+
         if (msgType === 'exec_command_output_delta') {
             const itemId = asString(msg.call_id ?? msg.callId ?? msg.item_id ?? msg.itemId ?? msg.id);
             const delta = asString(msg.delta ?? msg.output ?? msg.stdout ?? msg.text);
@@ -235,7 +270,6 @@ export class AppServerEventConverter {
             msgType === 'skills_update_available' ||
             msgType === 'stream_error' ||
             msgType === 'warning' ||
-            msgType === 'context_compacted' ||
             msgType === 'terminal_interaction' ||
             msgType === 'user_message'
         ) {
@@ -253,7 +287,18 @@ export class AppServerEventConverter {
             return this.handleWrappedCodexEvent(paramsRecord) ?? events;
         }
 
-        if (method === 'account/rateLimits/updated' || method === 'turn/plan/updated' || method === 'thread/compacted') {
+        if (BENIGN_NOTIFICATION_METHODS.has(method)) {
+            return events;
+        }
+
+        if (method === 'thread/compacted') {
+            const thread = asRecord(paramsRecord.thread) ?? paramsRecord;
+            const event = contextCompactedEvent(paramsRecord, thread);
+            events.push(event);
+            return events;
+        }
+
+        if (method === 'account/rateLimits/updated' || method === 'turn/plan/updated') {
             return events;
         }
 
@@ -466,6 +511,25 @@ export class AppServerEventConverter {
                 return events;
             }
 
+            if (itemType === 'contextcompaction') {
+                const threadId = asString(paramsRecord.threadId ?? paramsRecord.thread_id);
+                const turnId = asString(paramsRecord.turnId ?? paramsRecord.turn_id);
+                if (method === 'item/started') {
+                    events.push({
+                        type: 'task_started',
+                        ...(threadId ? { thread_id: threadId } : {}),
+                        ...(turnId ? { turn_id: turnId } : {})
+                    });
+                } else if (method === 'item/completed') {
+                    events.push({
+                        type: 'context_compacted',
+                        ...(threadId ? { thread_id: threadId } : {}),
+                        ...(turnId ? { turn_id: turnId } : {})
+                    });
+                }
+                return events;
+            }
+
             if (itemType === 'filechange') {
                 if (method === 'item/started') {
                     const changes = extractChanges(item.changes ?? item.change ?? item.diff);
@@ -500,6 +564,10 @@ export class AppServerEventConverter {
                     this.fileChangeMeta.delete(itemId);
                 }
 
+                return events;
+            }
+
+            if (BENIGN_ITEM_TYPES.has(itemType)) {
                 return events;
             }
         }

@@ -334,6 +334,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             } else if (msgType === 'task_failed') {
                 const error = asString(msg.error);
                 messageBuffer.addMessage(error ? `Task failed: ${error}` : 'Task failed', 'status');
+            } else if (msgType === 'context_compacted') {
+                messageBuffer.addMessage('Context compacted', 'status');
             }
 
             if (msgType === 'task_started') {
@@ -389,6 +391,12 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         id: randomUUID()
                     });
                 }
+            }
+            if (msgType === 'context_compacted') {
+                session.sendAgentMessage({
+                    ...msg,
+                    id: randomUUID()
+                });
             }
             if (msgType === 'exec_command_begin' || msgType === 'exec_approval_request') {
                 const callId = asString(msg.call_id ?? msg.callId);

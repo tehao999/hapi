@@ -7,7 +7,8 @@ const harness = vi.hoisted(() => ({
     registerRequestCalls: [] as string[],
     initializeCalls: [] as unknown[],
     turnCompletion: { status: 'Completed' } as { status: string; message?: string },
-    titleSyncCalls: [] as string[]
+    titleSyncCalls: [] as string[],
+    emitContextCompactionBeforeCompletion: false
 }));
 
 vi.mock('./codexAppServerClient', () => {
@@ -41,6 +42,16 @@ vi.mock('./codexAppServerClient', () => {
             const started = { turn: {} };
             harness.notifications.push({ method: 'turn/started', params: started });
             this.notificationHandler?.('turn/started', started);
+
+            if (harness.emitContextCompactionBeforeCompletion) {
+                const compacted = {
+                    threadId: 'thread-anonymous',
+                    previousTokens: 120000,
+                    tokens: 25000
+                };
+                harness.notifications.push({ method: 'thread/compacted', params: compacted });
+                this.notificationHandler?.('thread/compacted', compacted);
+            }
 
             const completed = { ...harness.turnCompletion, turn: {} };
             harness.notifications.push({ method: 'turn/completed', params: completed });
@@ -100,6 +111,8 @@ function createSessionStub() {
     const thinkingChanges: boolean[] = [];
     const foundSessionIds: string[] = [];
     let currentModel: string | null | undefined;
+    let currentModelReasoningEffort: string | null | undefined;
+    let currentServiceTier: string | null | undefined;
     let agentState: FakeAgentState = {
         requests: {},
         completedRequests: {}
@@ -145,6 +158,18 @@ function createSessionStub() {
         getModel() {
             return currentModel;
         },
+        setModelReasoningEffort(nextModelReasoningEffort: string | null) {
+            currentModelReasoningEffort = nextModelReasoningEffort;
+        },
+        getModelReasoningEffort() {
+            return currentModelReasoningEffort;
+        },
+        setServiceTier(nextServiceTier: string | null) {
+            currentServiceTier = nextServiceTier;
+        },
+        getServiceTier() {
+            return currentServiceTier;
+        },
         onThinkingChange(nextThinking: boolean) {
             session.thinking = nextThinking;
             thinkingChanges.push(nextThinking);
@@ -183,6 +208,7 @@ describe('codexRemoteLauncher', () => {
         harness.initializeCalls = [];
         harness.turnCompletion = { status: 'Completed' };
         harness.titleSyncCalls = [];
+        harness.emitContextCompactionBeforeCompletion = false;
     });
 
     it('finishes a turn and emits ready when task lifecycle events omit turn_id', async () => {
@@ -237,6 +263,26 @@ describe('codexRemoteLauncher', () => {
             type: 'task_failed',
             error: 'boom'
         }));
+    });
+
+    it('persists native context compaction notifications without ending the turn', async () => {
+        harness.emitContextCompactionBeforeCompletion = true;
+        const {
+            session,
+            codexMessages,
+            sessionEvents
+        } = createSessionStub();
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'context_compacted',
+            thread_id: 'thread-anonymous',
+            previousTokens: 120000,
+            tokens: 25000
+        }));
+        expect(sessionEvents.filter((event) => event.type === 'ready')).toHaveLength(1);
     });
 
     it('exits after an idle desktop-mirror takeover turn instead of waiting forever for more messages', async () => {

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { logger } from '@/ui/logger';
 import { AppServerEventConverter } from './appServerEventConverter';
 
 describe('AppServerEventConverter', () => {
@@ -136,6 +137,73 @@ describe('AppServerEventConverter', () => {
         expect(events).toEqual([{ type: 'turn_diff', unified_diff: 'diff --git a b' }]);
     });
 
+    it('maps native thread compaction notifications', () => {
+        const converter = new AppServerEventConverter();
+
+        const events = converter.handleNotification('thread/compacted', {
+            threadId: 'thread-1',
+            previousTokens: 120000,
+            tokens: 25000,
+            diagnostics: { internal: true }
+        });
+
+        expect(events).toEqual([{
+            type: 'context_compacted',
+            thread_id: 'thread-1',
+            previousTokens: 120000,
+            tokens: 25000
+        }]);
+    });
+
+    it('maps context compaction item lifecycle notifications', () => {
+        const converter = new AppServerEventConverter();
+
+        const started = converter.handleNotification('item/started', {
+            item: { type: 'contextCompaction', id: 'compact-1' },
+            threadId: 'thread-1',
+            turnId: 'turn-compact'
+        });
+        const completed = converter.handleNotification('item/completed', {
+            item: { type: 'contextCompaction', id: 'compact-1' },
+            threadId: 'thread-1',
+            turnId: 'turn-compact'
+        });
+
+        expect(started).toEqual([{
+            type: 'task_started',
+            thread_id: 'thread-1',
+            turn_id: 'turn-compact'
+        }]);
+        expect(completed).toEqual([{
+            type: 'context_compacted',
+            thread_id: 'thread-1',
+            turn_id: 'turn-compact'
+        }]);
+    });
+
+    it('unwraps codex/event context compaction events', () => {
+        const converter = new AppServerEventConverter();
+
+        const events = converter.handleNotification('codex/event/context_compacted', {
+            msg: {
+                type: 'context_compacted',
+                thread_id: 'thread-1',
+                turn_id: 'turn-1',
+                previous_tokens: 1000,
+                token_count: 200,
+                diagnostics: { internal: true }
+            }
+        });
+
+        expect(events).toEqual([{
+            type: 'context_compacted',
+            thread_id: 'thread-1',
+            turn_id: 'turn-1',
+            previousTokens: 1000,
+            tokens: 200
+        }]);
+    });
+
     it('unwraps codex/event task lifecycle', () => {
         const converter = new AppServerEventConverter();
 
@@ -249,6 +317,30 @@ describe('AppServerEventConverter', () => {
         });
 
         expect(events).toEqual([]);
+    });
+
+
+    it('silently ignores known benign app-server notifications', () => {
+        const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {})
+        const converter = new AppServerEventConverter();
+
+        expect(converter.handleNotification('thread/status/changed', {
+            threadId: 'thread-1',
+            status: { type: 'idle' }
+        })).toEqual([]);
+        expect(converter.handleNotification('serverRequest/resolved', {
+            threadId: 'thread-1',
+            requestId: 1
+        })).toEqual([]);
+        expect(converter.handleNotification('item/commandExecution/terminalInteraction', {
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            itemId: 'cmd-1',
+            stdin: ''
+        })).toEqual([]);
+
+        expect(debugSpy).not.toHaveBeenCalled();
+        debugSpy.mockRestore();
     });
 
     it('maps wrapped non-retryable errors to task_failed', () => {
