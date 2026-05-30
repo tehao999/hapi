@@ -26,14 +26,24 @@ describe('buildNotificationOptions', () => {
 })
 
 describe('shouldShowPushNotification', () => {
-    it('suppresses the native notification when this device already has a visible HAPI window', async () => {
+    it('suppresses the native notification when this device already has a focused HAPI window', async () => {
         const clientsApi = {
             matchAll: async () => [
-                { url: 'http://127.0.0.1:3006/sessions/session-1', visibilityState: 'visible' }
+                { url: 'http://127.0.0.1:3006/sessions/session-1', visibilityState: 'visible', focused: true }
             ]
         }
 
         await expect(shouldShowPushNotification(clientsApi)).resolves.toBe(false)
+    })
+
+    it('allows the native notification when iOS reports a background PWA window as visible but not focused', async () => {
+        const clientsApi = {
+            matchAll: async () => [
+                { url: 'http://127.0.0.1:3006/sessions/session-1', visibilityState: 'visible', focused: false }
+            ]
+        }
+
+        await expect(shouldShowPushNotification(clientsApi)).resolves.toBe(true)
     })
 
     it('allows the native notification when this device only has hidden HAPI windows', async () => {

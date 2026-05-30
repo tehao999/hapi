@@ -49,9 +49,7 @@ export async function shouldShowPushNotification(clientsApi: PushClientsLike): P
             includeUncontrolled: true
         })
 
-        return !windowClients.some((client) => (
-            client.visibilityState === 'visible' || client.focused === true
-        ))
+        return !windowClients.some((client) => client.focused === true)
     } catch {
         return true
     }
