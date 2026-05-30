@@ -23,6 +23,14 @@ export function filterResumeSubcommand(args: string[]): string[] {
     return args.slice(1);
 }
 
+export function buildCodexLocalServiceTierArgs(serviceTier?: ServiceTier): string[] {
+    if (!serviceTier || serviceTier === 'standard') {
+        return [];
+    }
+
+    return ['-c', `service_tier=${JSON.stringify(serviceTier)}`];
+}
+
 export async function codexLocal(opts: {
     abort: AbortSignal;
     sessionId: string | null;
@@ -50,9 +58,7 @@ export async function codexLocal(opts: {
         args.push('--model-reasoning-effort', opts.modelReasoningEffort);
     }
 
-    if (opts.serviceTier) {
-        args.push('--service-tier', opts.serviceTier);
-    }
+    args.push(...buildCodexLocalServiceTierArgs(opts.serviceTier));
 
     if (opts.sandbox) {
         args.push('--sandbox', opts.sandbox);

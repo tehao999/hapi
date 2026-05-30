@@ -75,7 +75,12 @@ function createQueueStub() {
     };
 }
 
-function createSessionStub(permissionMode: 'default' | 'read-only' | 'safe-yolo' | 'yolo', codexArgs?: string[], path = '/tmp/worktree') {
+function createSessionStub(
+    permissionMode: 'default' | 'read-only' | 'safe-yolo' | 'yolo',
+    codexArgs?: string[],
+    path = '/tmp/worktree',
+    serviceTier?: 'standard' | 'fast'
+) {
     const sessionEvents: Array<{ type: string; message?: string }> = [];
     let localLaunchFailure: { message: string; exitReason: 'switch' | 'exit' } | null = null;
 
@@ -94,6 +99,7 @@ function createSessionStub(permissionMode: 'default' | 'read-only' | 'safe-yolo'
             },
             getPermissionMode: () => permissionMode,
             getModelReasoningEffort: () => null,
+            getServiceTier: () => serviceTier ?? null,
             onSessionFound: () => {},
             sendSessionEvent: (event: { type: string; message?: string }) => {
                 sessionEvents.push(event);
@@ -149,6 +155,15 @@ describe('codexLocalLauncher', () => {
         await codexLocalLauncher(session as never);
 
         expect(harness.titleSyncCalls).toContain('thread-local');
+    });
+
+    it('passes the selected service tier into local Codex launch options', async () => {
+        const { session } = createSessionStub('default', undefined, '/tmp/worktree', 'fast');
+
+        await codexLocalLauncher(session as never);
+
+        expect(harness.launches).toHaveLength(1);
+        expect(harness.launches[0]?.serviceTier).toBe('fast');
     });
 
     it('preserves raw Codex approval flags in default mode', async () => {

@@ -62,20 +62,17 @@ export function buildCodexAppServerArgs(
     env: Record<string, string | undefined> = process.env
 ): string[] {
     const args = ['app-server'];
-    const rawAutoCompactLimit = env.HAPI_CODEX_AUTO_COMPACT_TOKEN_LIMIT;
+    const rawAutoCompactLimit = env.HAPI_CODEX_AUTO_COMPACT_TOKEN_LIMIT?.trim();
 
-    if (rawAutoCompactLimit === undefined) {
+    if (!rawAutoCompactLimit) {
         return args;
-    }
-
-    if (!/^[1-9][0-9]*$/.test(rawAutoCompactLimit)) {
-        throw new Error('HAPI_CODEX_AUTO_COMPACT_TOKEN_LIMIT must be a positive integer');
     }
 
     const autoCompactLimit = Number(rawAutoCompactLimit);
     if (
         !Number.isSafeInteger(autoCompactLimit) ||
-        autoCompactLimit <= 0
+        autoCompactLimit <= 0 ||
+        String(autoCompactLimit) !== rawAutoCompactLimit
     ) {
         throw new Error('HAPI_CODEX_AUTO_COMPACT_TOKEN_LIMIT must be a positive integer');
     }
