@@ -127,6 +127,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             }];
 
             session.onThinkingChange(true);
+            const turnStartedAt = Date.now();
 
             try {
                 await backend.prompt(acpSessionId, promptContent, (message: AgentMessage) => {
@@ -140,6 +141,10 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 });
                 messageBuffer.addMessage('OpenCode prompt failed', 'status');
             } finally {
+                session.sendSessionEvent({
+                    type: 'turn-duration',
+                    durationMs: Math.max(0, Date.now() - turnStartedAt)
+                });
                 session.onThinkingChange(false);
                 await this.permissionHandler?.cancelAll('Prompt finished');
                 if (session.queue.size() === 0 && !this.shouldExit) {

@@ -470,6 +470,9 @@ export class ApiSessionClient extends EventEmitter {
         mode: SessionPermissionMode
     } | {
         type: 'ready'
+    } | {
+        type: 'turn-duration'
+        durationMs: number
     }, id?: string): void {
         const content = {
             role: 'agent',
