@@ -6,6 +6,13 @@ const harness = vi.hoisted(() => ({
     notifications: [] as Array<{ method: string; params: unknown }>,
     registerRequestCalls: [] as string[],
     initializeCalls: [] as unknown[],
+    startTurnCalls: [] as unknown[],
+    compactCalls: [] as unknown[],
+    compactError: null as Error | null,
+    deferCompactCompletion: false,
+    deferCompactFailure: false,
+    emitDeferredCompactCompletion: null as null | (() => void),
+    emitDeferredCompactFailure: null as null | (() => void),
     turnCompletion: { status: 'Completed' } as { status: string; message?: string },
     titleSyncCalls: [] as string[],
     emitContextCompactionBeforeCompletion: false,
@@ -40,7 +47,8 @@ vi.mock('./codexAppServerClient', () => {
             return { thread: { id: 'thread-anonymous' }, model: 'gpt-5.4' };
         }
 
-        async startTurn(): Promise<{ turn: Record<string, never> }> {
+        async startTurn(params: unknown): Promise<{ turn: Record<string, never> }> {
+            harness.startTurnCalls.push(params);
             const started = { turn: {} };
             harness.notifications.push({ method: 'turn/started', params: started });
             this.notificationHandler?.('turn/started', started);
@@ -105,6 +113,55 @@ vi.mock('./codexAppServerClient', () => {
             return {};
         }
 
+        async compactThread(params: unknown): Promise<Record<string, never>> {
+            harness.compactCalls.push(params);
+            if (harness.compactError) {
+                throw harness.compactError;
+            }
+            if (harness.deferCompactCompletion) {
+                const started = {
+                    threadId: 'thread-anonymous',
+                    item: {
+                        type: 'contextCompaction',
+                        id: 'compact-delayed'
+                    }
+                };
+                this.notificationHandler?.('item/started', started);
+                harness.emitDeferredCompactCompletion = () => {
+                    const completed = {
+                        threadId: 'thread-anonymous',
+                        item: {
+                            type: 'contextCompaction',
+                            id: 'compact-delayed'
+                        }
+                    };
+                    this.notificationHandler?.('item/completed', completed);
+                };
+                return {};
+            }
+            if (harness.deferCompactFailure) {
+                const started = {
+                    threadId: 'thread-anonymous',
+                    item: {
+                        type: 'contextCompaction',
+                        id: 'compact-failed'
+                    }
+                };
+                this.notificationHandler?.('item/started', started);
+                harness.emitDeferredCompactFailure = () => {
+                    const failed = {
+                        status: 'Failed',
+                        message: 'compact failed asynchronously',
+                        turn: {}
+                    };
+                    this.notificationHandler?.('turn/completed', failed);
+                };
+                return {};
+            }
+            this.notificationHandler?.('thread/compacted', { threadId: 'thread-anonymous' });
+            return {};
+        }
+
         async disconnect(): Promise<void> {}
     }
 
@@ -142,9 +199,12 @@ function createMode(): EnhancedMode {
     };
 }
 
-function createSessionStub() {
+function createSessionStub(initialMessage: string | string[] = 'hello from launcher test') {
     const queue = new MessageQueue2<EnhancedMode>((mode) => JSON.stringify(mode));
-    queue.push('hello from launcher test', createMode());
+    const messages = Array.isArray(initialMessage) ? initialMessage : [initialMessage];
+    for (const message of messages) {
+        queue.push(message, createMode());
+    }
     queue.close();
 
     const sessionEvents: Array<{ type: string; [key: string]: unknown }> = [];
@@ -242,11 +302,28 @@ function createSessionStub() {
     };
 }
 
+async function waitForCondition(predicate: () => boolean, timeoutMs = 500): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+        if (Date.now() > deadline) {
+            throw new Error('Timed out waiting for condition');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+}
+
 describe('codexRemoteLauncher', () => {
     afterEach(() => {
         harness.notifications = [];
         harness.registerRequestCalls = [];
         harness.initializeCalls = [];
+        harness.startTurnCalls = [];
+        harness.compactCalls = [];
+        harness.compactError = null;
+        harness.deferCompactCompletion = false;
+        harness.deferCompactFailure = false;
+        harness.emitDeferredCompactCompletion = null;
+        harness.emitDeferredCompactFailure = null;
         harness.turnCompletion = { status: 'Completed' };
         harness.titleSyncCalls = [];
         harness.emitContextCompactionBeforeCompletion = false;
@@ -371,6 +448,231 @@ describe('codexRemoteLauncher', () => {
                 toolName: 'mcp__browser__open'
             })
         }));
+    });
+
+    it('runs native Codex compaction for /compact without starting a normal turn', async () => {
+        const {
+            session,
+            codexMessages,
+            sessionEvents
+        } = createSessionStub('/compact');
+        session.sessionId = 'thread-anonymous';
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.compactCalls).toEqual([{ threadId: 'thread-anonymous' }]);
+        expect(harness.startTurnCalls).toEqual([]);
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'context_compacted',
+            thread_id: 'thread-anonymous'
+        }));
+        expect(sessionEvents.filter((event) => event.type === 'ready')).toHaveLength(1);
+    });
+
+    it('keeps /compact in flight until the compaction completion event arrives', async () => {
+        harness.deferCompactCompletion = true;
+        const {
+            session,
+            codexMessages,
+            sessionEvents
+        } = createSessionStub('/compact');
+        session.sessionId = 'thread-anonymous';
+
+        let waits = 0;
+        let releaseIdleWait: (() => void) | null = null;
+        session.queue = {
+            size() {
+                return 0;
+            },
+            reset() {},
+            async waitForMessagesAndGetAsString() {
+                waits += 1;
+                if (waits === 1) {
+                    return {
+                        message: '/compact',
+                        mode: createMode(),
+                        isolate: true,
+                        hash: 'hash-compact'
+                    };
+                }
+                await new Promise<void>((resolve) => {
+                    releaseIdleWait = resolve;
+                });
+                return null;
+            }
+        } as never;
+
+        const launcherPromise = codexRemoteLauncher(session as never);
+
+        await waitForCondition(() => harness.compactCalls.length === 1);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        expect(waits).toBe(1);
+        expect(harness.startTurnCalls).toEqual([]);
+        expect(sessionEvents.filter((event) => event.type === 'ready')).toHaveLength(0);
+        expect(codexMessages).not.toContainEqual(expect.objectContaining({
+            type: 'context_compacted'
+        }));
+
+        harness.emitDeferredCompactCompletion?.();
+
+        await waitForCondition(() => codexMessages.some((message) => {
+            return Boolean(
+                message
+                && typeof message === 'object'
+                && (message as { type?: string }).type === 'context_compacted'
+            );
+        }));
+        await waitForCondition(() => sessionEvents.filter((event) => event.type === 'ready').length === 1);
+        await waitForCondition(() => waits >= 2);
+
+        (releaseIdleWait as (() => void) | null)?.();
+        const exitReason = await launcherPromise;
+
+        expect(exitReason).toBe('exit');
+        expect(sessionEvents.filter((event) => event.type === 'ready')).toHaveLength(1);
+    });
+
+    it('does not process queued follow-up text until /compact completes', async () => {
+        harness.deferCompactCompletion = true;
+        const {
+            session,
+            sessionEvents
+        } = createSessionStub('/compact');
+        session.sessionId = 'thread-anonymous';
+
+        let waits = 0;
+        let secondWaitCalled: (() => void) | null = null;
+        const secondWaitPromise = new Promise<void>((resolve) => {
+            secondWaitCalled = resolve;
+        });
+        session.queue = {
+            size() {
+                return 0;
+            },
+            reset() {},
+            async waitForMessagesAndGetAsString() {
+                waits += 1;
+                if (waits === 1) {
+                    return {
+                        message: '/compact',
+                        mode: createMode(),
+                        isolate: true,
+                        hash: 'hash-compact'
+                    };
+                }
+                secondWaitCalled?.();
+                if (waits === 2) {
+                    return {
+                        message: 'follow-up should wait',
+                        mode: createMode(),
+                        isolate: false,
+                        hash: 'hash-follow-up'
+                    };
+                }
+                return null;
+            }
+        } as never;
+
+        const launcherPromise = codexRemoteLauncher(session as never);
+
+        await waitForCondition(() => harness.compactCalls.length === 1);
+        const secondWaitBeforeCompletion = await Promise.race([
+            secondWaitPromise.then(() => true),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 25))
+        ]);
+
+        expect(secondWaitBeforeCompletion).toBe(false);
+        expect(harness.startTurnCalls).toEqual([]);
+        expect(sessionEvents.filter((event) => event.type === 'ready')).toHaveLength(0);
+
+        harness.emitDeferredCompactCompletion?.();
+
+        await waitForCondition(() => harness.startTurnCalls.length === 1);
+        const exitReason = await launcherPromise;
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startTurnCalls).toHaveLength(1);
+    });
+
+    it('settles /compact when an asynchronous failure event arrives', async () => {
+        harness.deferCompactFailure = true;
+        const {
+            session,
+            codexMessages,
+            sessionEvents
+        } = createSessionStub('/compact');
+        session.sessionId = 'thread-anonymous';
+
+        let waits = 0;
+        let releaseIdleWait: (() => void) | null = null;
+        session.queue = {
+            size() {
+                return 0;
+            },
+            reset() {},
+            async waitForMessagesAndGetAsString() {
+                waits += 1;
+                if (waits === 1) {
+                    return {
+                        message: '/compact',
+                        mode: createMode(),
+                        isolate: true,
+                        hash: 'hash-compact'
+                    };
+                }
+                await new Promise<void>((resolve) => {
+                    releaseIdleWait = resolve;
+                });
+                return null;
+            }
+        } as never;
+
+        const launcherPromise = codexRemoteLauncher(session as never);
+
+        await waitForCondition(() => harness.compactCalls.length === 1);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        expect(waits).toBe(1);
+        expect(sessionEvents.filter((event) => event.type === 'ready')).toHaveLength(0);
+
+        harness.emitDeferredCompactFailure?.();
+
+        await waitForCondition(() => codexMessages.some((message) => {
+            return Boolean(
+                message
+                && typeof message === 'object'
+                && (message as { type?: string }).type === 'task_failed'
+            );
+        }));
+        await waitForCondition(() => sessionEvents.filter((event) => event.type === 'ready').length === 1);
+        await waitForCondition(() => waits >= 2);
+
+        (releaseIdleWait as (() => void) | null)?.();
+        const exitReason = await launcherPromise;
+
+        expect(exitReason).toBe('exit');
+        expect(sessionEvents.filter((event) => event.type === 'ready')).toHaveLength(1);
+    });
+
+    it('reports /compact failures without starting a normal turn', async () => {
+        harness.compactError = new Error('compact unavailable');
+        const {
+            session,
+            codexMessages,
+            sessionEvents
+        } = createSessionStub('/compact');
+        session.sessionId = 'thread-anonymous';
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.compactCalls).toEqual([{ threadId: 'thread-anonymous' }]);
+        expect(harness.startTurnCalls).toEqual([]);
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'task_failed',
+            error: 'Compaction failed: compact unavailable'
+        }));
+        expect(sessionEvents.filter((event) => event.type === 'ready')).toHaveLength(1);
     });
 
     it('exits after an idle desktop-mirror takeover turn instead of waiting forever for more messages', async () => {

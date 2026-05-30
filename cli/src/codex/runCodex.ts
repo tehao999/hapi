@@ -12,6 +12,7 @@ import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { CodexCollaborationModeSchema, CodexServiceTierSchema, PermissionModeSchema } from '@hapi/protocol/schemas';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 import { getInvokedCwd } from '@/utils/invokedCwd';
+import { parseSpecialCommand } from '@/parsers/specialCommands';
 import type { ReasoningEffort } from './appServerTypes';
 import type { CodexServiceTier } from '@hapi/protocol/types';
 
@@ -134,6 +135,14 @@ export async function runCodex(opts: {
             serviceTier: currentServiceTier,
             collaborationMode: currentCollaborationMode
         };
+
+        const specialCommand = parseSpecialCommand(message.content.text);
+        if (specialCommand.type === 'compact') {
+            const commandText = specialCommand.originalMessage ?? message.content.text;
+            messageQueue.pushIsolateAndClear(commandText, enhancedMode);
+            return;
+        }
+
         const formattedText = formatMessageWithAttachments(message.content.text, message.content.attachments);
         messageQueue.push(formattedText, enhancedMode);
     });

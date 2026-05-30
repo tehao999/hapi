@@ -18,6 +18,7 @@ import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerC
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
 import { createCodexThreadTitlePoller, syncCodexThreadTitleToMetadata } from './utils/codexThreadTitle';
 import { compactToolOutputForHapi } from './utils/toolOutputCompaction';
+import { parseSpecialCommand } from '@/parsers/specialCommands';
 import {
     RemoteLauncherBase,
     type RemoteLauncherDisplayContext,
@@ -256,7 +257,32 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let clearReadyAfterTurnTimer: (() => void) | null = null;
         let turnInFlight = false;
         let allowAnonymousTerminalEvent = false;
+        let manualCompactionInFlight = false;
+        let resolveManualCompactionCompletion: (() => void) | null = null;
+        let clearManualCompactionAbortHandler: (() => void) | null = null;
         const mcpToolNamesByCallId = new Map<string, string>();
+
+        const finishManualCompaction = () => {
+            manualCompactionInFlight = false;
+            clearManualCompactionAbortHandler?.();
+            clearManualCompactionAbortHandler = null;
+            const resolve = resolveManualCompactionCompletion;
+            resolveManualCompactionCompletion = null;
+            resolve?.();
+        };
+
+        const beginManualCompaction = (signal: AbortSignal): Promise<void> => {
+            clearManualCompactionAbortHandler?.();
+            manualCompactionInFlight = true;
+            return new Promise((resolve) => {
+                resolveManualCompactionCompletion = resolve;
+                const abortHandler = () => finishManualCompaction();
+                signal.addEventListener('abort', abortHandler, { once: true });
+                clearManualCompactionAbortHandler = () => {
+                    signal.removeEventListener('abort', abortHandler);
+                };
+            });
+        };
 
         const handleCodexEvent = (msg: Record<string, unknown>) => {
             const msgType = asString(msg.type);
@@ -354,6 +380,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (isTerminalEvent) {
                 turnInFlight = false;
                 allowAnonymousTerminalEvent = false;
+                if (manualCompactionInFlight && (msgType === 'task_failed' || msgType === 'turn_aborted')) {
+                    finishManualCompaction();
+                }
                 syncThreadTitle(this.currentThreadId);
                 if (session.thinking) {
                     logger.debug('thinking completed');
@@ -363,7 +392,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 appServerEventConverter.reset();
             }
 
-            if (isTerminalEvent && !turnInFlight) {
+            if (isTerminalEvent && !turnInFlight && !manualCompactionInFlight) {
                 scheduleReadyAfterTurn?.();
             } else if (readyAfterTurnTimer && msgType !== 'task_started') {
                 scheduleReadyAfterTurn?.();
@@ -399,6 +428,20 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     ...msg,
                     id: randomUUID()
                 });
+
+                if (manualCompactionInFlight) {
+                    finishManualCompaction();
+                    turnInFlight = false;
+                    allowAnonymousTerminalEvent = false;
+                    syncThreadTitle(this.currentThreadId);
+                    if (session.thinking) {
+                        logger.debug('thinking completed');
+                        session.onThinkingChange(false);
+                    }
+                    diffProcessor.reset();
+                    appServerEventConverter.reset();
+                    scheduleReadyAfterTurn?.();
+                }
             }
             if (msgType === 'exec_command_begin' || msgType === 'exec_approval_request') {
                 const callId = asString(msg.call_id ?? msg.callId);
@@ -720,6 +763,56 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     }
                 }
 
+                const specialCommand = parseSpecialCommand(message.message);
+                if (specialCommand.type === 'compact') {
+                    if (!this.currentThreadId) {
+                        session.sendAgentMessage({
+                            type: 'task_failed',
+                            error: 'No Codex thread is available to compact.',
+                            id: randomUUID()
+                        });
+                        continue;
+                    }
+
+                    messageBuffer.addMessage('Compaction started', 'status');
+                    session.sendAgentMessage({
+                        type: 'message',
+                        message: 'Compaction started',
+                        id: randomUUID()
+                    });
+                    const manualCompactionCompletion = beginManualCompaction(this.abortController.signal);
+                    turnInFlight = true;
+                    allowAnonymousTerminalEvent = true;
+                    try {
+                        await appServerClient.compactThread({
+                            threadId: this.currentThreadId
+                        }, {
+                            signal: this.abortController.signal
+                        });
+                        syncThreadTitle(this.currentThreadId);
+                        if (manualCompactionInFlight) {
+                            await manualCompactionCompletion;
+                        }
+                    } catch (error) {
+                        finishManualCompaction();
+                        const detail = error instanceof Error ? error.message : String(error);
+                        const messageText = `Compaction failed: ${detail}`;
+                        logger.warn('[Codex] Failed to compact thread:', error);
+                        messageBuffer.addMessage(messageText, 'status');
+                        session.sendAgentMessage({
+                            type: 'task_failed',
+                            error: messageText,
+                            id: randomUUID()
+                        });
+                    } finally {
+                        if (!manualCompactionInFlight) {
+                            turnInFlight = false;
+                            allowAnonymousTerminalEvent = false;
+                        }
+                    }
+                    continue;
+                }
+
                 const sessionModelReasoningEffort = session.getModelReasoningEffort();
                 const sessionServiceTier = session.getServiceTier();
                 const turnParams = buildTurnStartParams({
@@ -770,7 +863,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     hasThread = false;
                 }
             } finally {
-                if (!turnInFlight) {
+                if (!turnInFlight && !manualCompactionInFlight) {
                     permissionHandler.reset();
                     reasoningProcessor.abort();
                     diffProcessor.reset();

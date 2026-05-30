@@ -161,4 +161,29 @@ describe('runCodex service tier config', () => {
         expect(queue.queue[0]?.mode.modelReasoningEffort).toBe('high');
         expect(queue.queue[0]?.mode.serviceTier).toBe('fast');
     });
+
+
+    it('isolates /compact user messages so they cannot be batched into normal turns', async () => {
+        await runCodex({});
+
+        const userMessageHandler = harness.session.onUserMessage.mock.calls[0]?.[0] as (message: unknown) => void;
+        userMessageHandler({
+            content: {
+                text: 'hello'
+            }
+        });
+        userMessageHandler({
+            content: {
+                text: '  /compact now  ',
+                attachments: [{ name: 'ignored.txt' }]
+            }
+        });
+
+        const queue = harness.loopArgs[0]?.messageQueue as { queue: Array<{ message: string; isolate?: boolean }> };
+        expect(queue.queue).toHaveLength(1);
+        expect(queue.queue[0]).toMatchObject({
+            message: '/compact now',
+            isolate: true
+        });
+    });
 });
