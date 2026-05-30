@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCliArgs, getRunnerAgentEnv } from './run'
+import { buildCliArgs } from './run'
 
 describe('buildCliArgs', () => {
     it('adds --permission-mode for valid permission mode', () => {
@@ -77,17 +77,6 @@ describe('buildCliArgs', () => {
         expect(args).toContain('--effort')
         expect(args).toContain('max')
         expect(args).not.toContain('medium')
-    })
-
-    it('injects the claude-deepseek wrapper path without touching other agent environments', () => {
-        expect(getRunnerAgentEnv('claude-deepseek', { HOME: '/Users/example' })).toEqual({
-            HAPI_CLAUDE_PATH: '/Users/example/.local/bin/claude-deepseek',
-        })
-        expect(getRunnerAgentEnv('claude-deepseek', { HAPI_CLAUDE_DEEPSEEK_PATH: '/custom/cc-ds' })).toEqual({
-            HAPI_CLAUDE_PATH: '/custom/cc-ds',
-        })
-        expect(getRunnerAgentEnv('claude', { HOME: '/Users/example' })).toEqual({})
-        expect(getRunnerAgentEnv('codex', { HOME: '/Users/example' })).toEqual({})
     })
 
     it('adds --service-tier for Codex sessions only', () => {

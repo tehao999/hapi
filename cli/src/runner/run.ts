@@ -24,10 +24,39 @@ import { join } from 'path';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { hashRunnerCliApiToken } from './runnerIdentity';
 
+const MANAGED_CODEX_SHARED_ENTRY_NAMES = [
+  'auth.json',
+  'config.toml',
+  'AGENTS.md',
+  'plugins',
+  'skills',
+  'superpowers',
+  'memories',
+  'memories_extensions',
+  'rules',
+  'computer-use',
+  'vendor_imports',
+  'models_cache.json'
+] as const;
+
 const CLAUDE_DEEPSEEK_AGENT = 'claude-deepseek';
 
 function getUserHome(env: NodeJS.ProcessEnv = process.env): string {
   return env.HOME?.trim() || os.homedir();
+}
+
+export function getDefaultCodexHome(env: NodeJS.ProcessEnv = process.env): string {
+  return join(getUserHome(env), '.codex');
+}
+
+export function getManagedCodexHome(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.HAPI_CODEX_HOME?.trim();
+  if (override) {
+    return override;
+  }
+
+  const hapiHome = env.HAPI_HOME?.trim() || join(getUserHome(env), '.hapi');
+  return join(hapiHome, 'codex-home');
 }
 
 export function getClaudeDeepSeekWrapperPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -43,6 +72,12 @@ export function isClaudeFamilyAgent(agent: string | undefined): boolean {
 }
 
 export function getRunnerAgentEnv(agent: string | undefined, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if (agent === 'codex') {
+    return {
+      CODEX_HOME: getManagedCodexHome(env)
+    };
+  }
+
   if (isClaudeDeepSeekAgent(agent)) {
     return {
       HAPI_CLAUDE_PATH: getClaudeDeepSeekWrapperPath(env)
@@ -50,6 +85,50 @@ export function getRunnerAgentEnv(agent: string | undefined, env: NodeJS.Process
   }
 
   return {};
+}
+
+export function getManagedCodexBootstrapEntryNames(): readonly string[] {
+  return MANAGED_CODEX_SHARED_ENTRY_NAMES;
+}
+
+async function linkCodexSharedEntryIfMissing(defaultCodexHome: string, managedCodexHome: string, entryName: string): Promise<void> {
+  const source = join(defaultCodexHome, entryName);
+  const destination = join(managedCodexHome, entryName);
+
+  const sourceStats = await fs.lstat(source).catch(() => null);
+  if (!sourceStats) {
+    return;
+  }
+
+  const destinationStats = await fs.lstat(destination).catch(() => null);
+  if (destinationStats) {
+    return;
+  }
+
+  const symlinkType = sourceStats.isDirectory()
+    ? (process.platform === 'win32' ? 'junction' : 'dir')
+    : 'file';
+  await fs.symlink(source, destination, symlinkType).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EEXIST') {
+      throw error;
+    }
+  });
+}
+
+export async function ensureManagedCodexHome(env: NodeJS.ProcessEnv = process.env): Promise<string> {
+  const managedCodexHome = getManagedCodexHome(env);
+  await fs.mkdir(managedCodexHome, { recursive: true, mode: 0o700 });
+
+  const defaultCodexHome = getDefaultCodexHome(env);
+  if (managedCodexHome === defaultCodexHome) {
+    return managedCodexHome;
+  }
+
+  await Promise.all(MANAGED_CODEX_SHARED_ENTRY_NAMES.map((entryName) =>
+    linkCodexSharedEntryIfMissing(defaultCodexHome, managedCodexHome, entryName)
+  ));
+
+  return managedCodexHome;
 }
 
 export async function startRunner(): Promise<void> {
@@ -337,6 +416,9 @@ export async function startRunner(): Promise<void> {
 
         // Resolve authentication token if provided
         let extraEnv: Record<string, string> = getRunnerAgentEnv(agent);
+        if (agent === 'codex' && !options.token) {
+          await ensureManagedCodexHome();
+        }
         if (options.token) {
           if (agent === 'codex') {
 
