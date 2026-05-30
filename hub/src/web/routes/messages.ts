@@ -12,6 +12,10 @@ const querySchema = z.object({
     markRead: z.enum(['true', '1']).optional()
 })
 
+const recentUserMessagesQuerySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(10).optional()
+})
+
 const sendMessageBodySchema = z.object({
     text: z.string(),
     localId: z.string().min(1).optional(),
@@ -20,6 +24,25 @@ const sendMessageBodySchema = z.object({
 
 export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
+
+
+    app.get('/sessions/:id/recent-user-messages', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const parsed = recentUserMessagesQuerySchema.safeParse(c.req.query())
+        const limit = parsed.success ? (parsed.data.limit ?? 10) : 10
+        return c.json({
+            messages: engine.getRecentUserMessages(sessionResult.sessionId, { limit })
+        })
+    })
 
     app.get('/sessions/:id/messages', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)

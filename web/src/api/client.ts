@@ -14,8 +14,10 @@ import type {
     PushSubscriptionPayload,
     PushUnsubscribePayload,
     PushVapidPublicKeyResponse,
+    RecentUserMessagesResponse,
     SlashCommandsResponse,
     SkillsResponse,
+    MentionsResponse,
     SpawnResponse,
     UploadFileResponse,
     VisibilityPayload,
@@ -204,6 +206,16 @@ export class ApiClient {
         const qs = params.toString()
         const url = `/api/sessions/${encodeURIComponent(sessionId)}/messages${qs ? `?${qs}` : ''}`
         return await this.request<MessagesResponse>(url)
+    }
+
+    async getRecentUserMessages(sessionId: string, options: { limit?: number } = {}): Promise<RecentUserMessagesResponse> {
+        const params = new URLSearchParams()
+        if (options.limit !== undefined && options.limit !== null) {
+            params.set('limit', `${options.limit}`)
+        }
+        const qs = params.toString()
+        const url = `/api/sessions/${encodeURIComponent(sessionId)}/recent-user-messages${qs ? `?${qs}` : ''}`
+        return await this.request<RecentUserMessagesResponse>(url)
     }
 
     async markSessionRead(sessionId: string): Promise<void> {
@@ -435,6 +447,13 @@ export class ApiClient {
     async getSlashCommands(sessionId: string): Promise<SlashCommandsResponse> {
         return await this.request<SlashCommandsResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/slash-commands`
+        )
+    }
+
+
+    async getMentions(sessionId: string): Promise<MentionsResponse> {
+        return await this.request<MentionsResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/mentions`
         )
     }
 

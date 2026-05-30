@@ -566,6 +566,35 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
     })
 
+
+    app.get('/sessions/:id/mentions', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const agent = sessionResult.session.metadata?.flavor ?? 'claude'
+        const machineId = sessionResult.session.metadata?.machineId
+        if (!machineId) {
+            return c.json({ success: false, error: 'Session missing machine ID' })
+        }
+
+        try {
+            const result = await engine.listMentions(machineId, agent)
+            return c.json(result)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list mentions'
+            })
+        }
+    })
+
     app.get('/sessions/:id/skills', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {

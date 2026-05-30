@@ -12,7 +12,7 @@ import {
     useRef,
     useState
 } from 'react'
-import type { AgentState, CodexCollaborationMode, PermissionMode } from '@/types/api'
+import type { AgentState, CodexCollaborationMode, PermissionMode, RecentUserMessage } from '@/types/api'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import type { ConversationStatus } from '@/realtime/types'
 import { useActiveWord } from '@/hooks/useActiveWord'
@@ -27,8 +27,11 @@ import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
 import { ComposerButtons } from '@/components/AssistantChat/ComposerButtons'
+import { SnippetPicker } from '@/components/AssistantChat/SnippetPicker'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
 import { useTranslation } from '@/lib/use-translation'
+import { clearComposerSnippet, getComposerSnippets, saveComposerSnippet } from '@/lib/composer-snippets'
+import { insertComposerSnippet } from '@/lib/composer-insertion'
 import { getModelOptionsForFlavor, getNextModelForFlavor } from './modelOptions'
 import { getClaudeComposerEffortOptions } from './claudeEffortOptions'
 import { getCodexComposerReasoningEffortOptions } from './codexReasoningEffortOptions'
@@ -70,6 +73,8 @@ export function HappyComposer(props: {
     terminalUnsupported?: boolean
     autocompletePrefixes?: string[]
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
+    autocompleteSuggestionsVersion?: unknown
+    loadRecentUserMessages?: () => Promise<RecentUserMessage[]>
     // Voice assistant props
     voiceStatus?: ConversationStatus
     voiceMicMuted?: boolean
@@ -105,6 +110,8 @@ export function HappyComposer(props: {
         terminalUnsupported = false,
         autocompletePrefixes = ['@', '/', '$'],
         autocompleteSuggestions = defaultSuggestionHandler,
+        autocompleteSuggestionsVersion,
+        loadRecentUserMessages,
         voiceStatus = 'disconnected',
         voiceMicMuted = false,
         onVoiceToggle,
@@ -146,6 +153,11 @@ export function HappyComposer(props: {
         selection: { start: 0, end: 0 }
     })
     const [showSettings, setShowSettings] = useState(false)
+    const [showSnippets, setShowSnippets] = useState(false)
+    const [snippetSlots, setSnippetSlots] = useState(() => getComposerSnippets())
+    const [recentUserMessages, setRecentUserMessages] = useState<RecentUserMessage[]>([])
+    const [recentUserMessagesLoading, setRecentUserMessagesLoading] = useState(false)
+    const [recentUserMessagesError, setRecentUserMessagesError] = useState<string | null>(null)
     const [isAborting, setIsAborting] = useState(false)
     const [isSwitching, setIsSwitching] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
@@ -184,7 +196,7 @@ export function HappyComposer(props: {
     const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions] = useActiveSuggestions(
         activeWord,
         autocompleteSuggestions,
-        { clampSelection: true, wrapAround: true }
+        { clampSelection: true, wrapAround: true, refreshKey: autocompleteSuggestionsVersion }
     )
 
     const haptic = useCallback((type: 'light' | 'success' | 'error' = 'light') => {
@@ -239,6 +251,60 @@ export function HappyComposer(props: {
 
         haptic('light')
     }, [api, suggestions, inputState, autocompletePrefixes, haptic, agentFlavor])
+
+    const focusComposerAt = useCallback((cursorPosition: number) => {
+        setTimeout(() => {
+            const el = textareaRef.current
+            if (!el) return
+            el.setSelectionRange(cursorPosition, cursorPosition)
+            try {
+                el.focus({ preventScroll: true })
+            } catch {
+                el.focus()
+            }
+        }, 0)
+    }, [])
+
+    const refreshRecentUserMessages = useCallback(async () => {
+        if (!loadRecentUserMessages) {
+            setRecentUserMessages([])
+            return
+        }
+        setRecentUserMessagesLoading(true)
+        setRecentUserMessagesError(null)
+        try {
+            const messages = await loadRecentUserMessages()
+            setRecentUserMessages(messages)
+        } catch (error) {
+            console.error('Failed to load recent user messages:', error)
+            setRecentUserMessages([])
+            setRecentUserMessagesError(t('composer.snippets.loadError'))
+        } finally {
+            setRecentUserMessagesLoading(false)
+        }
+    }, [loadRecentUserMessages, t])
+
+    const handleSnippetSelect = useCallback((text: string) => {
+        const result = insertComposerSnippet(inputState.text, inputState.selection, text)
+        api.composer().setText(result.text)
+        setInputState({
+            text: result.text,
+            selection: { start: result.cursorPosition, end: result.cursorPosition }
+        })
+        setShowSnippets(false)
+        focusComposerAt(result.cursorPosition)
+        haptic('light')
+    }, [api, focusComposerAt, haptic, inputState])
+
+    const handleSnippetSave = useCallback((index: number, text: string) => {
+        setSnippetSlots(saveComposerSnippet(index, text))
+        haptic('light')
+    }, [haptic])
+
+    const handleSnippetDelete = useCallback((index: number) => {
+        setSnippetSlots(clearComposerSnippet(index))
+        haptic('light')
+    }, [haptic])
 
     const abortDisabled = controlsDisabled || isAborting || !threadIsRunning
     const switchDisabled = controlsDisabled || isSwitching || !controlledByUser
@@ -362,6 +428,12 @@ export function HappyComposer(props: {
             }
         }
 
+        if (key === 'Escape' && showSnippets) {
+            e.preventDefault()
+            setShowSnippets(false)
+            return
+        }
+
         if (key === 'Escape' && threadIsRunning) {
             e.preventDefault()
             handleAbort()
@@ -384,6 +456,7 @@ export function HappyComposer(props: {
         clearSuggestions,
         handleSuggestionSelect,
         threadIsRunning,
+        showSnippets,
         handleAbort,
         onPermissionModeChange,
         permissionMode,
@@ -442,8 +515,22 @@ export function HappyComposer(props: {
 
     const handleSettingsToggle = useCallback(() => {
         haptic('light')
+        setShowSnippets(false)
         setShowSettings(prev => !prev)
     }, [haptic])
+
+    const handleSnippetsToggle = useCallback(() => {
+        haptic('light')
+        setShowSettings(false)
+        clearSuggestions()
+        setShowSnippets((prev) => {
+            const next = !prev
+            if (next) {
+                void refreshRecentUserMessages()
+            }
+            return next
+        })
+    }, [clearSuggestions, haptic, refreshRecentUserMessages])
 
     const handleSubmit = useCallback((event?: ReactFormEvent<HTMLFormElement>) => {
         if (event && !attachmentsReady) {
@@ -767,6 +854,24 @@ export function HappyComposer(props: {
             )
         }
 
+        if (showSnippets) {
+            return (
+                <div className="absolute bottom-[100%] mb-2 w-full">
+                    <FloatingOverlay maxHeight={420}>
+                        <SnippetPicker
+                            snippets={snippetSlots}
+                            recentMessages={recentUserMessages}
+                            recentLoading={recentUserMessagesLoading}
+                            recentError={recentUserMessagesError}
+                            onSelect={handleSnippetSelect}
+                            onSaveSnippet={handleSnippetSave}
+                            onDeleteSnippet={handleSnippetDelete}
+                        />
+                    </FloatingOverlay>
+                </div>
+            )
+        }
+
         if (suggestions.length > 0) {
             return (
                 <div className="absolute bottom-[100%] mb-2 w-full">
@@ -784,6 +889,7 @@ export function HappyComposer(props: {
         return null
     }, [
         showSettings,
+        showSnippets,
         showCollaborationSettings,
         showPermissionSettings,
         showModelSettings,
@@ -795,6 +901,10 @@ export function HappyComposer(props: {
         codexServiceTierOptions,
         claudeEffortOptions,
         suggestions,
+        snippetSlots,
+        recentUserMessages,
+        recentUserMessagesLoading,
+        recentUserMessagesError,
         selectedIndex,
         controlsDisabled,
         collaborationMode,
@@ -812,6 +922,9 @@ export function HappyComposer(props: {
         handleServiceTierChange,
         handleEffortChange,
         handleSuggestionSelect,
+        handleSnippetSelect,
+        handleSnippetSave,
+        handleSnippetDelete,
         t
     ])
 
@@ -863,6 +976,9 @@ export function HappyComposer(props: {
                             controlsDisabled={controlsDisabled}
                             showSettingsButton={showSettingsButton}
                             onSettingsToggle={handleSettingsToggle}
+                            showSnippetsButton
+                            snippetsActive={showSnippets}
+                            onSnippetsToggle={handleSnippetsToggle}
                             showTerminalButton={showTerminalButton}
                             terminalDisabled={terminalDisabled}
                             terminalLabel={terminalLabel}

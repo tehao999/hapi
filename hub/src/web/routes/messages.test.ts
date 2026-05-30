@@ -47,15 +47,19 @@ function createSession(overrides?: Partial<Session>): Session {
 
 function createApp(args?: {
     session?: Session
+    accessResult?: { ok: true; sessionId: string; session: Session } | { ok: false; reason: 'not-found' | 'access-denied' }
     recentMessages?: Array<{ id: string; seq: number; createdAt: number; localId?: string | null; content: unknown }>
+    recentUserMessages?: Array<{ id: string; seq: number; createdAt: number; text: string }>
 }) {
     const session = args?.session ?? createSession()
+    const accessResult = args?.accessResult ?? { ok: true as const, sessionId: session.id, session }
     const recentMessages = args?.recentMessages ?? []
     const sendMessageCalls: Array<[string, Record<string, unknown>]> = []
     const readCalls: Array<[string, string]> = []
+    const recentUserCalls: Array<[string, { limit: number }]> = []
 
     const engine = {
-        resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
+        resolveSessionAccess: () => accessResult,
         getMessagesPage: () => ({
             messages: recentMessages,
             page: {
@@ -67,6 +71,10 @@ function createApp(args?: {
         }),
         markSessionRead: (sessionId: string, namespace: string) => {
             readCalls.push([sessionId, namespace])
+        },
+        getRecentUserMessages: (sessionId: string, options: { limit: number }) => {
+            recentUserCalls.push([sessionId, options])
+            return args?.recentUserMessages ?? []
         },
         sendMessage: async (sessionId: string, payload: Record<string, unknown>) => {
             sendMessageCalls.push([sessionId, payload])
@@ -80,10 +88,55 @@ function createApp(args?: {
     })
     app.route('/api', createMessagesRoutes(() => engine as SyncEngine))
 
-    return { app, sendMessageCalls, readCalls }
+    return { app, sendMessageCalls, readCalls, recentUserCalls }
 }
 
 describe('messages routes', () => {
+    it('returns recent user messages without marking the session read', async () => {
+        const { app, readCalls, recentUserCalls } = createApp({
+            recentUserMessages: [
+                { id: 'message-2', seq: 2, createdAt: 20, text: 'second prompt' },
+                { id: 'message-1', seq: 1, createdAt: 10, text: 'first prompt' }
+            ]
+        })
+
+        const response = await app.request('/api/sessions/session-1/recent-user-messages?limit=10')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            messages: [
+                { id: 'message-2', seq: 2, createdAt: 20, text: 'second prompt' },
+                { id: 'message-1', seq: 1, createdAt: 10, text: 'first prompt' }
+            ]
+        })
+        expect(recentUserCalls).toEqual([['session-1', { limit: 10 }]])
+        expect(readCalls).toEqual([])
+    })
+
+    it('rejects recent user messages when session access is denied', async () => {
+        const { app, recentUserCalls } = createApp({
+            accessResult: { ok: false, reason: 'access-denied' }
+        })
+
+        const response = await app.request('/api/sessions/session-1/recent-user-messages?limit=10')
+
+        expect(response.status).toBe(403)
+        expect(await response.json()).toEqual({ error: 'Session access denied' })
+        expect(recentUserCalls).toEqual([])
+    })
+
+    it('returns not found for recent user messages when the session does not exist', async () => {
+        const { app, recentUserCalls } = createApp({
+            accessResult: { ok: false, reason: 'not-found' }
+        })
+
+        const response = await app.request('/api/sessions/missing/recent-user-messages?limit=10')
+
+        expect(response.status).toBe(404)
+        expect(await response.json()).toEqual({ error: 'Session not found' })
+        expect(recentUserCalls).toEqual([])
+    })
+
     it('does not mark latest messages read unless requested', async () => {
         const { app, readCalls } = createApp()
 

@@ -27,6 +27,7 @@ import { useSession } from '@/hooks/queries/useSession'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
+import { useMentions } from '@/hooks/queries/useMentions'
 import { useSendMessage } from '@/hooks/mutations/useSendMessage'
 import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
@@ -306,17 +307,28 @@ function SessionPage() {
     const {
         commands: slashCommands,
         getSuggestions: getSlashSuggestions,
+        suggestionsVersion: slashSuggestionsVersion,
     } = useSlashCommands(api, sessionId, agentType)
     const {
         getSuggestions: getSkillSuggestions,
+        suggestionsVersion: skillSuggestionsVersion,
     } = useSkills(api, sessionId)
+    const {
+        getSuggestions: getMentionSuggestions,
+        suggestionsVersion: mentionSuggestionsVersion,
+    } = useMentions(api, sessionId)
+
+    const autocompleteSuggestionsVersion = `${agentType}:${mentionSuggestionsVersion}:${skillSuggestionsVersion}:${slashSuggestionsVersion}`
 
     const getAutocompleteSuggestions = useCallback(async (query: string) => {
+        if (query.startsWith('@')) {
+            return await getMentionSuggestions(query)
+        }
         if (query.startsWith('$')) {
             return await getSkillSuggestions(query)
         }
         return await getSlashSuggestions(query)
-    }, [getSkillSuggestions, getSlashSuggestions])
+    }, [getMentionSuggestions, getSkillSuggestions, getSlashSuggestions])
 
     const refreshSelectedSession = useCallback(() => {
         void refetchSession()
@@ -351,6 +363,7 @@ function SessionPage() {
             onAtBottomChange={setAtBottom}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
+            autocompleteSuggestionsVersion={autocompleteSuggestionsVersion}
             availableSlashCommands={slashCommands}
         />
     )

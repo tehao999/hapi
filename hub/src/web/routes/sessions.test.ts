@@ -54,6 +54,7 @@ function createApp(session: Session) {
     const applySessionConfigCalls: Array<[string, Record<string, unknown>]> = []
     const readCalls: Array<[string, string]> = []
     const listSkillsCalls: Array<[string, string]> = []
+    const listMentionsCalls: Array<[string, string]> = []
     const applySessionConfig = async (sessionId: string, config: Record<string, unknown>) => {
         applySessionConfigCalls.push([sessionId, config])
     }
@@ -68,6 +69,10 @@ function createApp(session: Session) {
         listSkills: async (sessionId: string, agent: string) => {
             listSkillsCalls.push([sessionId, agent])
             return { success: true, skills: [] }
+        },
+        listMentions: async (machineId: string, agent: string) => {
+            listMentionsCalls.push([machineId, agent])
+            return { success: true, mentions: [] }
         }
     } as Partial<SyncEngine>
 
@@ -78,7 +83,7 @@ function createApp(session: Session) {
     })
     app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
 
-    return { app, applySessionConfigCalls, readCalls, listSkillsCalls }
+    return { app, applySessionConfigCalls, readCalls, listSkillsCalls, listMentionsCalls }
 }
 
 describe('sessions routes', () => {
@@ -127,6 +132,33 @@ describe('sessions routes', () => {
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({ success: true, skills: [] })
         expect(listSkillsCalls).toEqual([['session-1', 'claude']])
+    })
+
+    it('passes machine and session flavor when listing mentions', async () => {
+        const { app, listMentionsCalls } = createApp(createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                machineId: 'machine-1'
+            }
+        }))
+
+        const response = await app.request('/api/sessions/session-1/mentions')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ success: true, mentions: [] })
+        expect(listMentionsCalls).toEqual([['machine-1', 'codex']])
+    })
+
+    it('returns a structured error when listing mentions without a machine id', async () => {
+        const { app, listMentionsCalls } = createApp(createSession({ metadata: null }))
+
+        const response = await app.request('/api/sessions/session-1/mentions')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ success: false, error: 'Session missing machine ID' })
+        expect(listMentionsCalls).toEqual([])
     })
 
     it('rejects collaboration mode changes for local Codex sessions', async () => {

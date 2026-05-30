@@ -15,7 +15,7 @@ import type { RpcRegistry } from '../socket/rpcRegistry'
 import type { SSEManager } from '../sse/sseManager'
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
-import { MessageService } from './messageService'
+import { MessageService, type RecentUserMessage } from './messageService'
 import {
     RpcGateway,
     type RpcCommandResponse,
@@ -220,6 +220,10 @@ export class SyncEngine {
 
     getMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number }): DecryptedMessage[] {
         return this.messageService.getMessagesAfter(sessionId, options)
+    }
+
+    getRecentUserMessages(sessionId: string, options: { limit: number }): RecentUserMessage[] {
+        return this.messageService.getRecentUserMessages(sessionId, options)
     }
 
     handleRealtimeEvent(event: SyncEvent): void {
@@ -766,6 +770,22 @@ export class SyncEngine {
         error?: string
     }> {
         return await this.rpcGateway.listSlashCommands(sessionId, agent)
+    }
+
+
+    async listMentions(machineId: string, agent: string): Promise<{
+        success: boolean
+        mentions?: Array<{
+            name: string
+            label: string
+            insertText: string
+            description?: string
+            kind: 'app' | 'plugin'
+            pluginName: string
+        }>
+        error?: string
+    }> {
+        return await this.rpcGateway.listMentions(machineId, agent)
     }
 
     async listSkills(sessionId: string, agent: string): Promise<{

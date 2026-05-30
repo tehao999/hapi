@@ -222,6 +222,33 @@ export class RpcGateway {
         }
     }
 
+
+    async listMentions(machineId: string, agent: string): Promise<{
+        success: boolean
+        mentions?: Array<{
+            name: string
+            label: string
+            insertText: string
+            description?: string
+            kind: 'app' | 'plugin'
+            pluginName: string
+        }>
+        error?: string
+    }> {
+        return await this.machineRpc(machineId, 'listMentions', { agent }) as {
+            success: boolean
+            mentions?: Array<{
+                name: string
+                label: string
+                insertText: string
+                description?: string
+                kind: 'app' | 'plugin'
+                pluginName: string
+            }>
+            error?: string
+        }
+    }
+
     async listSkills(sessionId: string, agent: string): Promise<{
         success: boolean
         skills?: Array<{ name: string; description?: string }>

@@ -95,6 +95,17 @@ export type MessagesResponse = {
     }
 }
 
+export type RecentUserMessage = {
+    id: string
+    seq: number
+    createdAt: number
+    text: string
+}
+
+export type RecentUserMessagesResponse = {
+    messages: RecentUserMessage[]
+}
+
 export type MachinesResponse = {
     machines: Machine[]
     knownMachinesCount: number
@@ -187,6 +198,21 @@ export type SlashCommand = {
 export type SlashCommandsResponse = {
     success: boolean
     commands?: SlashCommand[]
+    error?: string
+}
+
+export type MentionSummary = {
+    name: string
+    label: string
+    insertText: string
+    description?: string
+    kind: 'app' | 'plugin'
+    pluginName: string
+}
+
+export type MentionsResponse = {
+    success: boolean
+    mentions?: MentionSummary[]
     error?: string
 }
 

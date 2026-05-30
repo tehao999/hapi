@@ -50,6 +50,7 @@ export function SessionChat(props: {
     onAtBottomChange: (atBottom: boolean) => void
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
+    autocompleteSuggestionsVersion?: unknown
     availableSlashCommands?: readonly SlashCommand[]
 }) {
     const { haptic } = usePlatform()
@@ -321,6 +322,11 @@ export function SessionChat(props: {
         })
     }, [navigate, props.session.id])
 
+    const handleLoadRecentUserMessages = useCallback(async () => {
+        const response = await props.api.getRecentUserMessages(props.session.id, { limit: 10 })
+        return response.messages
+    }, [props.api, props.session.id])
+
     const handleSend = useCallback((text: string, attachments?: AttachmentMetadata[]) => {
         if (agentFlavor === 'codex') {
             const unsupportedCommand = findUnsupportedCodexBuiltinSlashCommand(
@@ -459,6 +465,8 @@ export function SessionChat(props: {
                         onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
                         terminalUnsupported={props.session.active && !terminalSupported}
                         autocompleteSuggestions={props.autocompleteSuggestions}
+                        autocompleteSuggestionsVersion={props.autocompleteSuggestionsVersion}
+                        loadRecentUserMessages={handleLoadRecentUserMessages}
                         voiceStatus={voice?.status}
                         voiceMicMuted={voice?.micMuted}
                         onVoiceToggle={voice ? handleVoiceToggle : undefined}

@@ -31,6 +31,7 @@ export function useSlashCommands(
     isLoading: boolean
     error: string | null
     getSuggestions: (query: string) => Promise<Suggestion[]>
+    suggestionsVersion: number
 } {
     const resolvedSessionId = sessionId ?? 'unknown'
 
@@ -44,8 +45,11 @@ export function useSlashCommands(
             return await api.getSlashCommands(sessionId)
         },
         enabled: Boolean(api && sessionId),
-        staleTime: Infinity,
+        staleTime: 30_000,
         gcTime: 30 * 60 * 1000,
+        refetchOnMount: true,
+        refetchOnWindowFocus: true,
+        refetchOnReconnect: true,
         retry: false, // Don't retry RPC failures
     })
 
@@ -70,8 +74,20 @@ export function useSlashCommands(
             ? queryText.slice(1).toLowerCase()
             : queryText.toLowerCase()
 
+        let currentCommands = commands
+        if (api && sessionId && query.isStale && !query.isFetching) {
+            const refreshed = await query.refetch()
+            if (refreshed.data?.success && refreshed.data.commands) {
+                const builtin = getBuiltinSlashCommands(agentType)
+                const extraCommands = refreshed.data.commands.filter(
+                    cmd => cmd.source === 'user' || cmd.source === 'plugin' || cmd.source === 'project'
+                )
+                currentCommands = [...builtin, ...extraCommands]
+            }
+        }
+
         if (!searchTerm) {
-            return commands.map(cmd => ({
+            return currentCommands.map(cmd => ({
                 key: `/${cmd.name}`,
                 text: `/${cmd.name}`,
                 label: `/${cmd.name}`,
@@ -82,7 +98,7 @@ export function useSlashCommands(
         }
 
         const maxDistance = Math.max(2, Math.floor(searchTerm.length / 2))
-        return commands
+        return currentCommands
             .map(cmd => {
                 const name = cmd.name.toLowerCase()
                 let score: number
@@ -105,12 +121,13 @@ export function useSlashCommands(
                 content: cmd.content,
                 source: cmd.source
             }))
-    }, [commands])
+    }, [agentType, api, commands, query, sessionId])
 
     return {
         commands,
         isLoading: query.isLoading,
         error: query.error instanceof Error ? query.error.message : query.error ? 'Failed to load commands' : null,
         getSuggestions,
+        suggestionsVersion: query.dataUpdatedAt,
     }
 }
