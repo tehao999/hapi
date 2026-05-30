@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { DecryptedMessage, SessionsResponse } from '@/types/api'
 import {
-    clearMessageWindow,
     fetchLatestMessages,
     fetchOlderMessages,
     flushPendingMessages,
@@ -14,6 +13,8 @@ import {
 } from '@/lib/message-window-store'
 import { shouldMarkSessionRead } from '@/lib/readState'
 import { queryKeys } from '@/lib/query-keys'
+
+const READ_MARK_THROTTLE_MS = 10_000
 
 const EMPTY_STATE: MessageWindowState = {
     sessionId: 'unknown',
@@ -66,6 +67,10 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     setAtBottom: (atBottom: boolean) => void
 } {
     const queryClient = useQueryClient()
+    const previousMessagesVersionRef = useRef<number | null>(null)
+    const lastReadMarkAtRef = useRef(0)
+    const trailingReadMarkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const activeSessionRef = useRef<string | null>(sessionId)
     const state = useSyncExternalStore(
         useCallback((listener) => {
             if (!sessionId) {
@@ -82,29 +87,102 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         () => EMPTY_STATE
     )
 
-    const markReadIfActive = useCallback(async () => {
-        if (!api || !sessionId || !shouldMarkSessionRead()) {
+    const clearTrailingReadMarkTimer = useCallback(() => {
+        if (trailingReadMarkTimerRef.current === null) {
             return
+        }
+        clearTimeout(trailingReadMarkTimerRef.current)
+        trailingReadMarkTimerRef.current = null
+    }, [])
+
+    const clearLatestFetchUnreadLocally = useCallback(() => {
+        if (!sessionId) {
+            return
+        }
+        clearSessionUnreadCount(queryClient, sessionId)
+    }, [queryClient, sessionId])
+
+    const markReadOnServer = useCallback(async () => {
+        if (!api || !sessionId || !shouldMarkSessionRead()) {
+            return false
         }
 
         try {
             await api.markSessionRead(sessionId)
-            clearSessionUnreadCount(queryClient, sessionId)
-            void Promise.all([
-                queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-                queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) }),
-            ]).catch(() => {})
+            if (activeSessionRef.current !== sessionId) {
+                return false
+            }
+            lastReadMarkAtRef.current = Date.now()
+            return true
         } catch {
+            return false
         }
-    }, [api, queryClient, sessionId])
+    }, [api, sessionId])
 
-    useEffect(() => {
+    const scheduleTrailingReadMark = useCallback((delayMs: number) => {
+        if (trailingReadMarkTimerRef.current !== null) {
+            return
+        }
+        trailingReadMarkTimerRef.current = setTimeout(() => {
+            trailingReadMarkTimerRef.current = null
+            void markReadOnServer()
+        }, delayMs)
+    }, [markReadOnServer])
+
+    const markReadIfActive = useCallback(async (options?: { throttle?: boolean }) => {
+        if (!api || !sessionId || !shouldMarkSessionRead()) {
+            return
+        }
+
+        clearSessionUnreadCount(queryClient, sessionId)
+        const now = Date.now()
+        if (options?.throttle && lastReadMarkAtRef.current > 0) {
+            const elapsed = now - lastReadMarkAtRef.current
+            if (elapsed < READ_MARK_THROTTLE_MS) {
+                scheduleTrailingReadMark(READ_MARK_THROTTLE_MS - elapsed)
+                return
+            }
+        }
+
+        clearTrailingReadMarkTimer()
+        await markReadOnServer()
+    }, [api, clearTrailingReadMarkTimer, markReadOnServer, queryClient, scheduleTrailingReadMark, sessionId])
+
+    const fetchLatestAndMaybeMarkRead = useCallback(async () => {
         if (!api || !sessionId) {
             return
         }
-        void fetchLatestMessages(api, sessionId)
-        void markReadIfActive()
-    }, [api, markReadIfActive, sessionId])
+        const markRead = shouldMarkSessionRead()
+        if (markRead) {
+            clearLatestFetchUnreadLocally()
+        }
+        setMessageWindowAtBottom(sessionId, true)
+        const markedRead = await fetchLatestMessages(api, sessionId, { markRead })
+        if (markedRead && activeSessionRef.current === sessionId) {
+            clearTrailingReadMarkTimer()
+            lastReadMarkAtRef.current = Date.now()
+        }
+    }, [api, clearLatestFetchUnreadLocally, clearTrailingReadMarkTimer, sessionId])
+
+    useEffect(() => {
+        if (activeSessionRef.current === sessionId) {
+            return
+        }
+        clearTrailingReadMarkTimer()
+        activeSessionRef.current = sessionId
+        previousMessagesVersionRef.current = null
+        lastReadMarkAtRef.current = 0
+    }, [clearTrailingReadMarkTimer, sessionId])
+
+    useEffect(() => {
+        void fetchLatestAndMaybeMarkRead()
+    }, [fetchLatestAndMaybeMarkRead])
+
+    useEffect(() => {
+        return () => {
+            clearTrailingReadMarkTimer()
+        }
+    }, [clearTrailingReadMarkTimer])
 
     useEffect(() => {
         if (!api || !sessionId) {
@@ -124,17 +202,13 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     }, [api, markReadIfActive, sessionId])
 
     useEffect(() => {
-        void markReadIfActive()
-    }, [markReadIfActive, state.messagesVersion])
-
-    useEffect(() => {
-        if (!sessionId) {
+        const previousMessagesVersion = previousMessagesVersionRef.current
+        previousMessagesVersionRef.current = state.messagesVersion
+        if (previousMessagesVersion === null || state.messagesVersion === previousMessagesVersion) {
             return
         }
-        return () => {
-            clearMessageWindow(sessionId)
-        }
-    }, [sessionId])
+        void markReadIfActive({ throttle: true })
+    }, [markReadIfActive, state.messagesVersion])
 
     const loadMore = useCallback(async () => {
         if (!api || !sessionId) return
@@ -143,19 +217,16 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     }, [api, sessionId, state.hasMore, state.isLoadingMore])
 
     const refetch = useCallback(async () => {
-        if (!api || !sessionId) return
-        await fetchLatestMessages(api, sessionId)
-        await markReadIfActive()
-    }, [api, markReadIfActive, sessionId])
+        await fetchLatestAndMaybeMarkRead()
+    }, [fetchLatestAndMaybeMarkRead])
 
     const flushPending = useCallback(async () => {
         if (!sessionId) return
         const needsRefresh = flushPendingMessages(sessionId)
-        if (needsRefresh && api) {
-            await fetchLatestMessages(api, sessionId)
-            await markReadIfActive()
+        if (needsRefresh) {
+            await fetchLatestAndMaybeMarkRead()
         }
-    }, [api, markReadIfActive, sessionId])
+    }, [fetchLatestAndMaybeMarkRead, sessionId])
 
     const setAtBottom = useCallback((atBottom: boolean) => {
         if (!sessionId) return

@@ -20,6 +20,8 @@ export type MessageWindowState = {
 
 export const VISIBLE_WINDOW_SIZE = 400
 export const PENDING_WINDOW_SIZE = 200
+export const MESSAGE_WINDOW_IDLE_TTL_MS = 5 * 60 * 1000
+export const MAX_IDLE_MESSAGE_WINDOWS = 10
 const PAGE_SIZE = 50
 const PENDING_OVERFLOW_WARNING = 'New messages arrived while you were away. Scroll to bottom to refresh.'
 
@@ -37,6 +39,7 @@ type PendingVisibilityCacheEntry = {
 const states = new Map<string, InternalState>()
 const listeners = new Map<string, Set<() => void>>()
 const pendingVisibilityCacheBySession = new Map<string, Map<string, PendingVisibilityCacheEntry>>()
+const idleCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 // Throttled notification: coalesce rapid state updates into at most one
 // notification per NOTIFY_THROTTLE_MS during streaming. This prevents
@@ -92,6 +95,42 @@ function getPendingVisibilityCache(sessionId: string): Map<string, PendingVisibi
 
 function clearPendingVisibilityCache(sessionId: string): void {
     pendingVisibilityCacheBySession.delete(sessionId)
+}
+
+function clearIdleCleanup(sessionId: string): void {
+    const timer = idleCleanupTimers.get(sessionId)
+    if (!timer) {
+        return
+    }
+    clearTimeout(timer)
+    idleCleanupTimers.delete(sessionId)
+}
+
+function deleteMessageWindowState(sessionId: string): void {
+    states.delete(sessionId)
+    clearPendingVisibilityCache(sessionId)
+    pendingNotifySessionIds.delete(sessionId)
+}
+
+function evictOldestIdleWindowsIfNeeded(): void {
+    while (idleCleanupTimers.size > MAX_IDLE_MESSAGE_WINDOWS) {
+        const oldestSessionId = idleCleanupTimers.keys().next().value as string | undefined
+        if (!oldestSessionId) {
+            return
+        }
+        clearIdleCleanup(oldestSessionId)
+        deleteMessageWindowState(oldestSessionId)
+    }
+}
+
+function scheduleIdleCleanup(sessionId: string): void {
+    clearIdleCleanup(sessionId)
+    const timer = setTimeout(() => {
+        idleCleanupTimers.delete(sessionId)
+        deleteMessageWindowState(sessionId)
+    }, MESSAGE_WINDOW_IDLE_TTL_MS)
+    idleCleanupTimers.set(sessionId, timer)
+    evictOldestIdleWindowsIfNeeded()
 }
 
 function isVisiblePendingMessage(sessionId: string, message: DecryptedMessage): boolean {
@@ -173,6 +212,9 @@ function notifyImmediate(sessionId: string): void {
 
 function setState(sessionId: string, next: InternalState, immediate?: boolean): void {
     states.set(sessionId, next)
+    if (!listeners.has(sessionId) && !idleCleanupTimers.has(sessionId)) {
+        scheduleIdleCleanup(sessionId)
+    }
     if (immediate) {
         notifyImmediate(sessionId)
     } else {
@@ -325,6 +367,7 @@ export function getMessageWindowState(sessionId: string): MessageWindowState {
 }
 
 export function subscribeMessageWindow(sessionId: string, listener: () => void): () => void {
+    clearIdleCleanup(sessionId)
     const subs = listeners.get(sessionId) ?? new Set()
     subs.add(listener)
     listeners.set(sessionId, subs)
@@ -334,13 +377,13 @@ export function subscribeMessageWindow(sessionId: string, listener: () => void):
         current.delete(listener)
         if (current.size === 0) {
             listeners.delete(sessionId)
-            states.delete(sessionId)
-            clearPendingVisibilityCache(sessionId)
+            scheduleIdleCleanup(sessionId)
         }
     }
 }
 
 export function clearMessageWindow(sessionId: string): void {
+    clearIdleCleanup(sessionId)
     clearPendingVisibilityCache(sessionId)
     if (!states.has(sessionId)) {
         return
@@ -372,10 +415,18 @@ export async function fetchLatestMessages(
     api: ApiClient,
     sessionId: string,
     options?: { markRead?: boolean }
-): Promise<void> {
+): Promise<boolean> {
     const initial = getState(sessionId)
     if (initial.isLoading) {
-        return
+        if (options?.markRead) {
+            try {
+                await api.markSessionRead(sessionId)
+                return true
+            } catch {
+                return false
+            }
+        }
+        return false
     }
     updateState(sessionId, (prev) => buildState(prev, { isLoading: true, warning: null }))
 
@@ -410,9 +461,11 @@ export async function fetchLatestMessages(
                 warning: pendingResult.warning,
             })
         })
+        return Boolean(options?.markRead)
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to load messages'
         updateState(sessionId, (prev) => buildState(prev, { isLoading: false, warning: message }))
+        return false
     }
 }
 

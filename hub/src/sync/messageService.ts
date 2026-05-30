@@ -20,7 +20,20 @@ export class MessageService {
             hasMore: boolean
         }
     } {
-        const stored = this.store.messages.getMessages(sessionId, options.limit, options.beforeSeq ?? undefined)
+        const requestedLimit = Number.isFinite(options.limit)
+            ? Math.max(1, Math.min(200, Math.trunc(options.limit)))
+            : 50
+        const lookaheadLimit = requestedLimit + 1
+        const storedWithLookahead = this.store.messages.getMessages(
+            sessionId,
+            lookaheadLimit,
+            options.beforeSeq ?? undefined,
+            { maxLimit: lookaheadLimit }
+        )
+        const hasMore = storedWithLookahead.length > requestedLimit
+        const stored = hasMore
+            ? storedWithLookahead.slice(storedWithLookahead.length - requestedLimit)
+            : storedWithLookahead
         const messages: DecryptedMessage[] = stored.map((message) => ({
             id: message.id,
             seq: message.seq,
@@ -38,13 +51,11 @@ export class MessageService {
         }
 
         const nextBeforeSeq = oldestSeq
-        const hasMore = nextBeforeSeq !== null
-            && this.store.messages.getMessages(sessionId, 1, nextBeforeSeq).length > 0
 
         return {
             messages,
             page: {
-                limit: options.limit,
+                limit: requestedLimit,
                 beforeSeq: options.beforeSeq,
                 nextBeforeSeq,
                 hasMore

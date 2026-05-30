@@ -75,9 +75,14 @@ export function getMessages(
     db: Database,
     sessionId: string,
     limit: number = 200,
-    beforeSeq?: number
+    beforeSeq?: number,
+    options?: { maxLimit?: number }
 ): StoredMessage[] {
-    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 200
+    const requestedMaxLimit = options?.maxLimit
+    const maxLimit = typeof requestedMaxLimit === 'number' && Number.isFinite(requestedMaxLimit)
+        ? Math.max(1, requestedMaxLimit)
+        : 200
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(maxLimit, limit)) : Math.min(200, maxLimit)
 
     const rows = (beforeSeq !== undefined && beforeSeq !== null && Number.isFinite(beforeSeq))
         ? db.prepare(
