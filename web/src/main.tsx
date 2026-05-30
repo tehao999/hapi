@@ -11,6 +11,7 @@ import { queryClient } from './lib/query-client'
 import { createAppRouter } from './router'
 import { I18nProvider } from './lib/i18n-context'
 import { restoreSpaRedirect } from './lib/spaRedirect'
+import { handleNeedRefresh, scheduleServiceWorkerRefresh } from '@/lib/pwaUpdate'
 
 function getStartParam(): string | null {
     const query = new URLSearchParams(window.location.search)
@@ -52,18 +53,14 @@ async function bootstrap() {
 
     const updateSW = registerSW({
         onNeedRefresh() {
-            if (confirm('New version available! Reload to update?')) {
-                updateSW(true)
-            }
+            void handleNeedRefresh(updateSW)
         },
         onOfflineReady() {
             console.log('App ready for offline use')
         },
         onRegistered(registration) {
             if (registration) {
-                setInterval(() => {
-                    registration.update()
-                }, 60 * 60 * 1000)
+                scheduleServiceWorkerRefresh(registration)
             }
         },
         onRegisterError(error) {
