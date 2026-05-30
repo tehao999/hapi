@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, it, spyOn } from 'bun:test'
-import * as webPush from 'web-push'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { PushService } from './pushService'
 import type { Store } from '../store'
 
@@ -9,14 +8,6 @@ const vapidKeys = {
     publicKey: 'BI2mGp2npODvccK_M8qXIp09mZxH-BqkR5Bce5p8lttel_0QedqtFZOu7eKbQ8DNvUyN_XEFWSX_QFwZyyyCJoM',
     privateKey: 'NOPpnMRFRN4jmg-tVYfC69-jRi6Qucv8Y9lhmU8Kc1I'
 }
-
-afterEach(() => {
-    try {
-        ;(webPush.sendNotification as { mockRestore?: () => void }).mockRestore?.()
-    } catch {
-        // Some bun spy implementations throw if already restored.
-    }
-})
 
 function createStore(subscriptions: StoredSubscription[] = [{ endpoint: 'https://web.push.apple.com/stale', p256dh: 'p', auth: 'a' }]) {
     const removed: string[] = []
@@ -43,8 +34,12 @@ function createError(fields: { statusCode?: number; code?: string }): Error & { 
 describe('PushService failed subscription handling', () => {
     it('removes subscriptions that fail with permanent status codes', async () => {
         const { store, removed } = createStore()
-        spyOn(webPush, 'sendNotification').mockRejectedValue(createError({ statusCode: 404 }))
-        const service = new PushService(vapidKeys, 'mailto:test@example.com', store)
+        const service = new PushService(
+            vapidKeys,
+            'mailto:test@example.com',
+            store,
+            async () => { throw createError({ statusCode: 404 }) }
+        )
 
         await service.sendToNamespace('default', { title: 't', body: 'b' })
 
@@ -53,9 +48,13 @@ describe('PushService failed subscription handling', () => {
 
     it('does not remove subscriptions for TLS certificate transport errors', async () => {
         const { store, removed } = createStore()
-        spyOn(webPush, 'sendNotification').mockRejectedValue(createError({ code: 'UNKNOWN_CERTIFICATE_VERIFICATION_ERROR' }))
         const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
-        const service = new PushService(vapidKeys, 'mailto:test@example.com', store)
+        const service = new PushService(
+            vapidKeys,
+            'mailto:test@example.com',
+            store,
+            async () => { throw createError({ code: 'UNKNOWN_CERTIFICATE_VERIFICATION_ERROR' }) }
+        )
 
         await service.sendToNamespace('default', { title: 't', body: 'b' })
 
@@ -66,9 +65,14 @@ describe('PushService failed subscription handling', () => {
 
     it('removes subscriptions after repeated transient failures', async () => {
         const { store, removed } = createStore()
-        spyOn(webPush, 'sendNotification').mockRejectedValue(createError({ statusCode: 500 }))
         const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
-        const service = new PushService(vapidKeys, 'mailto:test@example.com', store, undefined, { maxConsecutiveFailures: 2 })
+        const service = new PushService(
+            vapidKeys,
+            'mailto:test@example.com',
+            store,
+            async () => { throw createError({ statusCode: 500 }) },
+            { maxConsecutiveFailures: 2 }
+        )
 
         await service.sendToNamespace('default', { title: 't', body: 'b' })
         expect(removed).toEqual([])
@@ -81,13 +85,21 @@ describe('PushService failed subscription handling', () => {
 
     it('resets transient failure count after a successful send', async () => {
         const { store, removed } = createStore()
-        const sendSpy = spyOn(webPush, 'sendNotification')
-        sendSpy
-            .mockRejectedValueOnce(createError({ statusCode: 500 }))
-            .mockResolvedValueOnce({ statusCode: 201, body: '', headers: {} })
-            .mockRejectedValueOnce(createError({ statusCode: 500 }))
+        let callCount = 0
         const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
-        const service = new PushService(vapidKeys, 'mailto:test@example.com', store, undefined, { maxConsecutiveFailures: 2 })
+        const service = new PushService(
+            vapidKeys,
+            'mailto:test@example.com',
+            store,
+            async () => {
+                callCount += 1
+                if (callCount === 2) {
+                    return { statusCode: 201, body: '', headers: {} }
+                }
+                throw createError({ statusCode: 500 })
+            },
+            { maxConsecutiveFailures: 2 }
+        )
 
         await service.sendToNamespace('default', { title: 't', body: 'b' })
         await service.sendToNamespace('default', { title: 't', body: 'b' })
@@ -101,9 +113,14 @@ describe('PushService failed subscription handling', () => {
     it('tracks transient failures per namespace even when endpoints match', async () => {
         const subscription = { endpoint: 'https://web.push.apple.com/shared', p256dh: 'p', auth: 'a' }
         const { store, removed } = createStore([subscription])
-        spyOn(webPush, 'sendNotification').mockRejectedValue(createError({ statusCode: 500 }))
         const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
-        const service = new PushService(vapidKeys, 'mailto:test@example.com', store, undefined, { maxConsecutiveFailures: 2 })
+        const service = new PushService(
+            vapidKeys,
+            'mailto:test@example.com',
+            store,
+            async () => { throw createError({ statusCode: 500 }) },
+            { maxConsecutiveFailures: 2 }
+        )
 
         await service.sendToNamespace('alpha', { title: 't', body: 'b' })
         await service.sendToNamespace('beta', { title: 't', body: 'b' })
