@@ -40,7 +40,7 @@ import type { Session } from './types'
 
 const now = 1_710_000_000_000
 
-function createSession(): Session {
+function createSession(metadata: Session['metadata'] = null): Session {
     return {
         id: 'session-1',
         namespace: 'default',
@@ -49,7 +49,7 @@ function createSession(): Session {
         updatedAt: now,
         active: true,
         activeAt: now,
-        metadata: null,
+        metadata,
         metadataVersion: 0,
         agentState: null,
         agentStateVersion: 0,
@@ -64,7 +64,7 @@ function createSession(): Session {
     }
 }
 
-function createClient() {
+function createClient(metadata: Session['metadata'] = null) {
     harness.handlers.clear()
     const fakeSocket = {
         on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
@@ -72,11 +72,16 @@ function createClient() {
         }),
         connect: vi.fn(),
         emit: vi.fn(),
+        emitWithAck: vi.fn().mockImplementation((_event: string, payload: { metadata?: unknown }) => Promise.resolve({
+            result: 'success',
+            version: 1,
+            metadata: payload?.metadata ?? metadata
+        })),
         volatile: { emit: vi.fn() }
     }
     harness.ioMock.mockReturnValue(fakeSocket)
 
-    const client = new ApiSessionClient('cli-token', createSession())
+    const client = new ApiSessionClient('cli-token', createSession(metadata))
     return { client, fakeSocket }
 }
 
@@ -195,5 +200,65 @@ describe('ApiSessionClient incoming user messages', () => {
         }, 1, 'codex:thread-1:12:abc123')
 
         expect(received).toEqual([])
+    })
+
+    it('skips socket metadata updates when the handler returns the current metadata object unchanged', async () => {
+        const metadata = {
+            path: '/tmp/project',
+            host: 'localhost',
+            flavor: 'codex',
+            title: 'Same title',
+            titleUpdatedAt: now
+        }
+        const { client, fakeSocket } = createClient(metadata)
+
+        client.updateMetadata((current) => current)
+        await Promise.resolve()
+        await Promise.resolve()
+
+        expect(fakeSocket.emitWithAck).not.toHaveBeenCalled()
+    })
+
+    it('skips socket metadata updates when the handler returns a deep-equal metadata clone', async () => {
+        const metadata = {
+            path: '/tmp/project',
+            host: 'localhost',
+            flavor: 'codex',
+            title: 'Same title',
+            titleUpdatedAt: now
+        }
+        const { client, fakeSocket } = createClient(metadata)
+
+        client.updateMetadata((current) => ({ ...current }))
+        await Promise.resolve()
+        await Promise.resolve()
+
+        expect(fakeSocket.emitWithAck).not.toHaveBeenCalled()
+    })
+
+    it('sends socket metadata updates when the handler mutates the working metadata object', async () => {
+        const metadata = {
+            path: '/tmp/project',
+            host: 'localhost',
+            flavor: 'codex',
+            title: 'Old title',
+            titleUpdatedAt: now
+        }
+        const { client, fakeSocket } = createClient(metadata)
+
+        client.updateMetadata((current) => {
+            current.title = 'New title'
+            return current
+        })
+        await Promise.resolve()
+        await Promise.resolve()
+
+        expect(fakeSocket.emitWithAck).toHaveBeenCalledTimes(1)
+        expect(fakeSocket.emitWithAck).toHaveBeenCalledWith('update-metadata', expect.objectContaining({
+            metadata: expect.objectContaining({
+                title: 'New title'
+            })
+        }))
+        expect(metadata.title).toBe('Old title')
     })
 })

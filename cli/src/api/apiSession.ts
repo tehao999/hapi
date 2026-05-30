@@ -26,8 +26,8 @@ import type {
     SessionCollaborationMode,
     Session,
     SessionModel,
-    SessionPermissionMode,
     SessionServiceTier,
+    SessionPermissionMode,
     UserMessage
 } from './types'
 import { AgentStateSchema, CliMessagesResponseSchema, MetadataSchema, UserMessageSchema } from './types'
@@ -37,6 +37,7 @@ import { cleanupUploadDir } from '../modules/common/handlers/uploads'
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
+import { deepEqual } from '@/utils/deepEqual'
 
 /**
  * XML tags that Claude Code injects as `type:'user'` messages.
@@ -542,8 +543,13 @@ export class ApiSessionClient extends EventEmitter {
     updateMetadata(handler: (metadata: Metadata) => Metadata): void {
         this.metadataLock.inLock(async () => {
             await backoff(async () => {
-                const current = this.metadata ?? ({} as Metadata)
+                const previous = this.metadata ?? ({} as Metadata)
+                const current = structuredClone(previous) as Metadata
                 const updated = handler(current)
+
+                if (deepEqual(updated, previous)) {
+                    return
+                }
 
                 const answer = await this.socket.emitWithAck('update-metadata', {
                     sid: this.sessionId,
