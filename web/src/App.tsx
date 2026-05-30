@@ -27,6 +27,7 @@ import { ReconnectingBanner } from '@/components/ReconnectingBanner'
 import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ToastProvider, useToast } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
 
@@ -323,20 +324,22 @@ function AppInner() {
 
     return (
         <AppContextProvider value={{ api, token, baseUrl }}>
-            <VoiceProvider>
-                <SyncingBanner isSyncing={isSyncing} />
-                <ReconnectingBanner
-                    isReconnecting={sseDisconnected && !isSyncing}
-                    reason={sseDisconnectReason}
-                />
-                <VoiceErrorBanner />
-                <OfflineBanner />
-                <div className="h-full min-h-0 flex flex-col">
-                    <Outlet />
-                </div>
-                <ToastContainer />
-                <InstallPrompt />
-            </VoiceProvider>
+            <ErrorBoundary>
+                <VoiceProvider>
+                    <SyncingBanner isSyncing={isSyncing} />
+                    <ReconnectingBanner
+                        isReconnecting={sseDisconnected && !isSyncing}
+                        reason={sseDisconnectReason}
+                    />
+                    <VoiceErrorBanner />
+                    <OfflineBanner />
+                    <div className="h-full min-h-0 flex flex-col">
+                        <Outlet />
+                    </div>
+                    <ToastContainer />
+                    <InstallPrompt />
+                </VoiceProvider>
+            </ErrorBoundary>
         </AppContextProvider>
     )
 }
