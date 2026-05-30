@@ -1,6 +1,6 @@
 import { CLAUDE_MODEL_PRESETS, getClaudeModelLabel } from '@hapi/protocol'
 import { describe, expect, it } from 'vitest'
-import { CLAUDE_EFFORT_OPTIONS, MODEL_OPTIONS } from './types'
+import { CLAUDE_EFFORT_OPTIONS, CODEX_SERVICE_TIER_OPTIONS, MODEL_OPTIONS } from './types'
 
 describe('Claude model options', () => {
     it('matches the concise local Claude Code model menu', () => {
@@ -25,6 +25,16 @@ describe('Claude effort options', () => {
             { value: 'medium', label: 'Medium' },
             { value: 'high', label: 'High' },
             { value: 'max', label: 'Max' },
+        ])
+    })
+})
+
+describe('Codex service tier options', () => {
+    it('matches supported service tiers in expected order', () => {
+        expect(CODEX_SERVICE_TIER_OPTIONS).toEqual([
+            { value: 'default', label: 'Default' },
+            { value: 'standard', label: 'Standard' },
+            { value: 'fast', label: 'Fast' },
         ])
     })
 })

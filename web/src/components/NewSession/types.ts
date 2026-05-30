@@ -9,6 +9,7 @@ import {
 export type AgentType = 'claude' | 'claude-deepseek' | 'codex' | 'cursor' | 'gemini' | 'opencode'
 export type SessionType = 'simple' | 'worktree'
 export type CodexReasoningEffort = 'default' | 'low' | 'medium' | 'high' | 'xhigh'
+export type CodexServiceTier = 'default' | 'standard' | 'fast'
 export type ClaudeEffort = 'auto' | 'medium' | 'high' | 'max'
 
 export const MODEL_OPTIONS: Record<AgentType, { value: string; label: string }[]> = {
@@ -41,6 +42,12 @@ export const CODEX_REASONING_EFFORT_OPTIONS: { value: CodexReasoningEffort; labe
     { value: 'medium', label: 'Medium' },
     { value: 'high', label: 'High' },
     { value: 'xhigh', label: 'XHigh' },
+]
+
+export const CODEX_SERVICE_TIER_OPTIONS: { value: CodexServiceTier; label: string }[] = [
+    { value: 'default', label: 'Default' },
+    { value: 'standard', label: 'Standard' },
+    { value: 'fast', label: 'Fast' },
 ]
 
 export const CLAUDE_EFFORT_OPTIONS: { value: ClaudeEffort; label: string }[] = [

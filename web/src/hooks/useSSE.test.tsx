@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import { queryKeys } from '@/lib/query-keys'
+import type { Session } from '@/types/api'
 import { useSSE } from './useSSE'
 
 class FakeEventSource {
@@ -25,15 +27,45 @@ class FakeEventSource {
     }
 }
 
-function createWrapper() {
+function createHarness() {
     const queryClient = new QueryClient({
         defaultOptions: {
             queries: { retry: false },
             mutations: { retry: false }
         }
     })
-    return function Wrapper({ children }: { children: ReactNode }) {
+    const wrapper = function Wrapper({ children }: { children: ReactNode }) {
         return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    }
+    return { queryClient, wrapper }
+}
+
+function createWrapper() {
+    return createHarness().wrapper
+}
+
+function createSession(overrides: Partial<Session> = {}): Session {
+    return {
+        id: 'session-1',
+        namespace: 'default',
+        seq: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        active: true,
+        activeAt: 1,
+        metadata: { path: '/repo', host: 'host', flavor: 'codex' },
+        metadataVersion: 1,
+        agentState: null,
+        agentStateVersion: 1,
+        thinking: false,
+        thinkingAt: 1,
+        model: null,
+        modelReasoningEffort: null,
+        serviceTier: null,
+        effort: null,
+        permissionMode: 'default',
+        collaborationMode: 'default',
+        ...overrides
     }
 }
 
@@ -77,4 +109,32 @@ describe('useSSE', () => {
         expect(onDisconnect).toHaveBeenCalledWith('rejected:session-not-found')
         expect(FakeEventSource.instances).toHaveLength(1)
     })
+
+    it('applies serviceTier session patches to cached session details', () => {
+        vi.stubGlobal('EventSource', FakeEventSource)
+        const { queryClient, wrapper } = createHarness()
+        queryClient.setQueryData(queryKeys.session('session-1'), { session: createSession() })
+
+        renderHook(() => useSSE({
+            enabled: true,
+            token: 'token',
+            baseUrl: 'http://localhost:3000',
+            subscription: { sessionId: 'session-1' },
+            onEvent: vi.fn()
+        }), { wrapper })
+
+        expect(FakeEventSource.instances).toHaveLength(1)
+
+        act(() => {
+            FakeEventSource.instances[0]!.emit({
+                type: 'session-updated',
+                sessionId: 'session-1',
+                data: { serviceTier: 'fast' }
+            })
+        })
+
+        const cached = queryClient.getQueryData<{ session: Session }>(queryKeys.session('session-1'))
+        expect(cached?.session.serviceTier).toBe('fast')
+    })
+
 })
