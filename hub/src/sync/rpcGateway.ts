@@ -222,12 +222,12 @@ export class RpcGateway {
         }
     }
 
-    async listSkills(sessionId: string): Promise<{
+    async listSkills(sessionId: string, agent: string): Promise<{
         success: boolean
         skills?: Array<{ name: string; description?: string }>
         error?: string
     }> {
-        return await this.sessionRpc(sessionId, 'listSkills', {}) as {
+        return await this.sessionRpc(sessionId, 'listSkills', { agent }) as {
             success: boolean
             skills?: Array<{ name: string; description?: string }>
             error?: string

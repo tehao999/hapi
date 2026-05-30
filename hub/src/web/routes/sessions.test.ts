@@ -53,6 +53,7 @@ function createSession(overrides?: Partial<Session>): Session {
 function createApp(session: Session) {
     const applySessionConfigCalls: Array<[string, Record<string, unknown>]> = []
     const readCalls: Array<[string, string]> = []
+    const listSkillsCalls: Array<[string, string]> = []
     const applySessionConfig = async (sessionId: string, config: Record<string, unknown>) => {
         applySessionConfigCalls.push([sessionId, config])
     }
@@ -63,6 +64,10 @@ function createApp(session: Session) {
         applySessionConfig,
         markSessionRead: (sessionId: string, namespace: string) => {
             readCalls.push([sessionId, namespace])
+        },
+        listSkills: async (sessionId: string, agent: string) => {
+            listSkillsCalls.push([sessionId, agent])
+            return { success: true, skills: [] }
         }
     } as Partial<SyncEngine>
 
@@ -73,7 +78,7 @@ function createApp(session: Session) {
     })
     app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
 
-    return { app, applySessionConfigCalls, readCalls }
+    return { app, applySessionConfigCalls, readCalls, listSkillsCalls }
 }
 
 describe('sessions routes', () => {
@@ -96,6 +101,32 @@ describe('sessions routes', () => {
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({ ok: true })
         expect(readCalls).toEqual([['session-1', 'default']])
+    })
+
+    it('passes session flavor when listing skills', async () => {
+        const { app, listSkillsCalls } = createApp(createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex'
+            }
+        }))
+
+        const response = await app.request('/api/sessions/session-1/skills')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ success: true, skills: [] })
+        expect(listSkillsCalls).toEqual([['session-1', 'codex']])
+    })
+
+    it('defaults to claude when listing skills for a session without flavor metadata', async () => {
+        const { app, listSkillsCalls } = createApp(createSession({ metadata: null }))
+
+        const response = await app.request('/api/sessions/session-1/skills')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ success: true, skills: [] })
+        expect(listSkillsCalls).toEqual([['session-1', 'claude']])
     })
 
     it('rejects collaboration mode changes for local Codex sessions', async () => {
