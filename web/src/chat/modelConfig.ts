@@ -22,12 +22,16 @@ export function getContextBudgetTokens(model: string | null | undefined, flavor?
     const trimmedModel = model?.trim()
     const windowTokens = (() => {
         if (!trimmedModel) {
-            return DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS
+            return LARGE_CLAUDE_CONTEXT_WINDOW_TOKENS
+        }
+        if (trimmedModel === 'opus' || trimmedModel.endsWith('[1m]')) {
+            return LARGE_CLAUDE_CONTEXT_WINDOW_TOKENS
+        }
+        if (trimmedModel === 'claude-opus-4-8' || trimmedModel.startsWith('claude-opus-4-8-')) {
+            return LARGE_CLAUDE_CONTEXT_WINDOW_TOKENS
         }
         if (isClaudeModelPreset(trimmedModel)) {
-            return trimmedModel.endsWith('[1m]')
-                ? LARGE_CLAUDE_CONTEXT_WINDOW_TOKENS
-                : DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS
+            return DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS
         }
         if (trimmedModel.startsWith('claude-')) {
             return DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS
