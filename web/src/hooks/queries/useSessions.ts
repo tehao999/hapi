@@ -20,6 +20,7 @@ export function useSessions(api: ApiClient | null): {
             return await api.getSessions()
         },
         enabled: Boolean(api),
+        staleTime: 30_000,
     })
 
     useEffect(() => {
