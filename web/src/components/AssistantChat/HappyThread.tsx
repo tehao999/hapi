@@ -55,6 +55,9 @@ const THREAD_MESSAGE_COMPONENTS = {
     SystemMessage: HappySystemMessage
 } as const
 
+const INITIAL_SCROLL_MIN_FRAMES = 3
+const INITIAL_SCROLL_MAX_FRAMES = 12
+
 export function HappyThread(props: {
     api: ApiClient
     sessionId: string
@@ -94,7 +97,10 @@ export function HappyThread(props: {
 
     // Smart scroll state: autoScroll enabled when user is near bottom
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
+    const [initialScrollSettled, setInitialScrollSettled] = useState(false)
     const autoScrollEnabledRef = useRef(autoScrollEnabled)
+    const initialScrollDoneRef = useRef(false)
+    const initialScrollScheduledRef = useRef(false)
 
     // Keep refs in sync with state
     useEffect(() => {
@@ -146,27 +152,96 @@ export function HappyThread(props: {
         return () => viewport.removeEventListener('scroll', handleScroll)
     }, []) // Stable: no dependencies, reads from refs
 
-    // Scroll to bottom handler for the indicator button
-    const scrollToBottom = useCallback(() => {
+    // Scroll to bottom handler for the indicator button and explicit positioning events
+    const scrollToBottom = useCallback((
+        behavior: ScrollBehavior = 'smooth',
+        options?: { flushPending?: boolean }
+    ) => {
         const viewport = viewportRef.current
         if (viewport) {
-            viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
+            viewport.scrollTo({ top: viewport.scrollHeight, behavior })
         }
         setAutoScrollEnabled(true)
         if (!atBottomRef.current) {
             atBottomRef.current = true
             onAtBottomChangeRef.current(true)
         }
-        onFlushPendingRef.current()
+        if (options?.flushPending !== false) {
+            onFlushPendingRef.current()
+        }
     }, [])
 
-    // Reset state when session changes
-    useEffect(() => {
+    // Reset state before the first layout pass for a newly opened session.
+    useLayoutEffect(() => {
+        initialScrollDoneRef.current = false
+        initialScrollScheduledRef.current = false
+        setInitialScrollSettled(false)
         setAutoScrollEnabled(true)
         atBottomRef.current = true
         onAtBottomChangeRef.current(true)
         forceScrollTokenRef.current = props.forceScrollToken
     }, [props.sessionId])
+
+    useLayoutEffect(() => {
+        if (initialScrollDoneRef.current || initialScrollScheduledRef.current) {
+            return
+        }
+        if (props.isLoadingMessages || props.rawMessagesCount === 0) {
+            return
+        }
+
+        initialScrollScheduledRef.current = true
+        let frameId: number | null = null
+        let frameCount = 0
+        let stableFrameCount = 0
+        let lastScrollHeight = -1
+
+        const settleInitialScroll = () => {
+            initialScrollScheduledRef.current = false
+            initialScrollDoneRef.current = true
+            setInitialScrollSettled(true)
+        }
+
+        const runInitialScrollFrame = () => {
+            const viewport = viewportRef.current
+            if (!viewport) {
+                initialScrollScheduledRef.current = false
+                return
+            }
+
+            frameCount += 1
+            const currentScrollHeight = viewport.scrollHeight
+            if (currentScrollHeight === lastScrollHeight) {
+                stableFrameCount += 1
+            } else {
+                stableFrameCount = 0
+                lastScrollHeight = currentScrollHeight
+            }
+
+            scrollToBottom('auto', { flushPending: frameCount === 1 })
+
+            if (
+                frameCount >= INITIAL_SCROLL_MAX_FRAMES
+                || (frameCount >= INITIAL_SCROLL_MIN_FRAMES && stableFrameCount >= 2)
+            ) {
+                settleInitialScroll()
+                return
+            }
+
+            frameId = requestAnimationFrame(runInitialScrollFrame)
+        }
+
+        frameId = requestAnimationFrame(runInitialScrollFrame)
+
+        return () => {
+            if (frameId !== null) {
+                cancelAnimationFrame(frameId)
+            }
+            if (!initialScrollDoneRef.current) {
+                initialScrollScheduledRef.current = false
+            }
+        }
+    }, [props.isLoadingMessages, props.messagesVersion, props.rawMessagesCount, props.sessionId, scrollToBottom])
 
     useEffect(() => {
         if (forceScrollTokenRef.current === props.forceScrollToken) {
@@ -217,7 +292,7 @@ export function HappyThread(props: {
     useEffect(() => {
         const sentinel = topSentinelRef.current
         const viewport = viewportRef.current
-        if (!sentinel || !viewport || !props.hasMoreMessages || props.isLoadingMessages) {
+        if (!initialScrollSettled || !sentinel || !viewport || !props.hasMoreMessages || props.isLoadingMessages) {
             return
         }
         if (typeof IntersectionObserver === 'undefined') {
@@ -240,7 +315,7 @@ export function HappyThread(props: {
 
         observer.observe(sentinel)
         return () => observer.disconnect()
-    }, [props.hasMoreMessages, props.isLoadingMessages])
+    }, [initialScrollSettled, props.hasMoreMessages, props.isLoadingMessages])
 
     useLayoutEffect(() => {
         const pending = pendingScrollRef.current
@@ -332,7 +407,7 @@ export function HappyThread(props: {
                         </div>
                     </div>
                 </ThreadPrimitive.Viewport>
-                <NewMessagesIndicator count={props.pendingCount} onClick={scrollToBottom} />
+                <NewMessagesIndicator count={props.pendingCount} onClick={() => scrollToBottom()} />
             </ThreadPrimitive.Root>
         </HappyChatProvider>
     )
