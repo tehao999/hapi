@@ -9,6 +9,13 @@ const harness = vi.hoisted(() => ({
     startTurnCalls: [] as unknown[],
     interruptCalls: [] as unknown[],
     compactCalls: [] as unknown[],
+    goalGetCalls: [] as unknown[],
+    goalSetCalls: [] as unknown[],
+    goalClearCalls: [] as unknown[],
+    goalGetResponse: null as null | { goal: unknown },
+    goalError: null as Error | null,
+    emitTurnStartedDuringGoalSet: false,
+    emitTurnStartedAfterGoalSet: false,
     compactError: null as Error | null,
     deferCompactCompletion: false,
     deferCompactFailure: false,
@@ -201,6 +208,65 @@ vi.mock('./codexAppServerClient', () => {
             return {};
         }
 
+        async getThreadGoal(params: unknown): Promise<{ goal: unknown }> {
+            harness.goalGetCalls.push(params);
+            if (harness.goalError) {
+                throw harness.goalError;
+            }
+            return harness.goalGetResponse ?? { goal: null };
+        }
+
+        async setThreadGoal(params: unknown): Promise<{ goal: unknown }> {
+            harness.goalSetCalls.push(params);
+            if (harness.goalError) {
+                throw harness.goalError;
+            }
+            if (harness.emitTurnStartedDuringGoalSet) {
+                this.notificationHandler?.('thread/goal/updated', {
+                    threadId: 'thread-anonymous',
+                    turnId: null,
+                    goal: {
+                        threadId: 'thread-anonymous',
+                        objective: 'from notification',
+                        status: 'active',
+                        tokenBudget: null,
+                        tokensUsed: 0,
+                        timeUsedSeconds: 0,
+                        createdAt: 1,
+                        updatedAt: 2
+                    }
+                });
+                this.notificationHandler?.('turn/started', { turn: { id: 'goal-side-turn' } });
+                this.notificationHandler?.('turn/completed', { turn: { id: 'goal-side-turn' }, status: 'Completed' });
+            }
+            if (harness.emitTurnStartedAfterGoalSet) {
+                setTimeout(() => {
+                    this.notificationHandler?.('turn/started', { turn: { id: 'goal-delayed-turn' } });
+                }, 0);
+            }
+            return {
+                goal: {
+                    threadId: 'thread-anonymous',
+                    objective: (params as { objective?: string }).objective ?? '',
+                    status: 'active',
+                    tokenBudget: null,
+                    tokensUsed: 0,
+                    timeUsedSeconds: 0,
+                    createdAt: 1,
+                    updatedAt: 2
+                }
+            };
+        }
+
+        async clearThreadGoal(params: unknown): Promise<{ cleared: boolean }> {
+            harness.goalClearCalls.push(params);
+            if (harness.goalError) {
+                throw harness.goalError;
+            }
+            this.notificationHandler?.('thread/goal/cleared', { threadId: 'thread-anonymous' });
+            return { cleared: true };
+        }
+
         async disconnect(): Promise<void> {}
     }
 
@@ -359,6 +425,13 @@ describe('codexRemoteLauncher', () => {
         harness.startTurnCalls = [];
         harness.interruptCalls = [];
         harness.compactCalls = [];
+        harness.goalGetCalls = [];
+        harness.goalSetCalls = [];
+        harness.goalClearCalls = [];
+        harness.goalGetResponse = null;
+        harness.goalError = null;
+        harness.emitTurnStartedDuringGoalSet = false;
+        harness.emitTurnStartedAfterGoalSet = false;
         harness.compactError = null;
         harness.deferCompactCompletion = false;
         harness.deferCompactFailure = false;
@@ -659,6 +732,108 @@ describe('codexRemoteLauncher', () => {
             thread_id: 'thread-anonymous'
         }));
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('sets native Codex goals through app-server without starting a normal turn or leaving thinking stuck', async () => {
+        harness.emitTurnStartedDuringGoalSet = true;
+        harness.emitTurnStartedAfterGoalSet = true;
+        const {
+            session,
+            codexMessages,
+            sessionEvents,
+            thinkingChanges
+        } = createSessionStub('/goal finish the HAPI goal fix');
+        session.sessionId = 'thread-anonymous';
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(harness.goalSetCalls).toEqual([{
+            threadId: 'thread-anonymous',
+            objective: 'finish the HAPI goal fix'
+        }]);
+        expect(harness.startTurnCalls).toEqual([]);
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'message',
+            message: 'Goal set: finish the HAPI goal fix'
+        }));
+        expect(thinkingChanges).not.toContain(true);
+        expect(session.thinking).toBe(false);
+        expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('renders the current native Codex goal objective from app-server get response', async () => {
+        harness.goalGetResponse = {
+            goal: {
+                threadId: 'thread-anonymous',
+                objective: 'keep working until verified',
+                status: 'usageLimited',
+                tokenBudget: null,
+                tokensUsed: 42,
+                timeUsedSeconds: 7,
+                createdAt: 1,
+                updatedAt: 2
+            }
+        };
+        const {
+            session,
+            codexMessages
+        } = createSessionStub('/goal');
+        session.sessionId = 'thread-anonymous';
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.goalGetCalls).toEqual([{ threadId: 'thread-anonymous' }]);
+        expect(harness.startTurnCalls).toEqual([]);
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'message',
+            message: expect.stringContaining('keep working until verified')
+        }));
+        expect(codexMessages).not.toContainEqual(expect.objectContaining({
+            message: expect.stringContaining('[object Object]')
+        }));
+    });
+
+    it('clears native Codex goals through app-server without starting a normal turn', async () => {
+        const {
+            session,
+            codexMessages
+        } = createSessionStub('/goal clear');
+        session.sessionId = 'thread-anonymous';
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.goalClearCalls).toEqual([{ threadId: 'thread-anonymous' }]);
+        expect(harness.startTurnCalls).toEqual([]);
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'message',
+            message: 'Goal cleared'
+        }));
+    });
+
+    it('reports older Codex app-server versions that lack native goal RPCs', async () => {
+        harness.goalError = new Error('method not found: thread/goal/set');
+        const {
+            session,
+            codexMessages
+        } = createSessionStub('/goal finish the HAPI goal fix');
+        session.sessionId = 'thread-anonymous';
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.goalSetCalls).toEqual([{
+            threadId: 'thread-anonymous',
+            objective: 'finish the HAPI goal fix'
+        }]);
+        expect(harness.startTurnCalls).toEqual([]);
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'task_failed',
+            error: 'Your version of Codex does not support the native /goal command. Please update Codex.'
+        }));
     });
 
     it('keeps /compact in flight until the compaction completion event arrives', async () => {

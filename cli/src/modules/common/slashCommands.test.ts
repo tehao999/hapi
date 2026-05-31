@@ -128,6 +128,11 @@ describe('listSlashCommands', () => {
             source: 'builtin'
         })
         expect(commands).toContainEqual({
+            name: 'goal',
+            description: 'Set, view, or clear the conversation goal',
+            source: 'builtin'
+        })
+        expect(commands).toContainEqual({
             name: 'deepseek-user',
             description: 'DeepSeek user',
             source: 'user',
@@ -149,6 +154,11 @@ describe('listSlashCommands', () => {
         expect(commands).toContainEqual({
             name: 'compact',
             description: 'Compact conversation context',
+            source: 'builtin',
+        })
+        expect(commands).toContainEqual({
+            name: 'goal',
+            description: 'Set, view, or clear the conversation goal',
             source: 'builtin',
         })
     })

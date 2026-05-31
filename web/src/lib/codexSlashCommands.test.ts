@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { findUnsupportedCodexBuiltinSlashCommand, getBuiltinSlashCommands } from './codexSlashCommands'
 
 describe('getBuiltinSlashCommands', () => {
-    it('does not expose codex built-ins in remote web mode', () => {
-        expect(getBuiltinSlashCommands('codex')).toEqual([])
+    it('exposes only Codex built-ins that HAPI remote mode handles end-to-end', () => {
+        expect(getBuiltinSlashCommands('codex')).toEqual([
+            { name: 'goal', description: 'Set, view, or clear the conversation goal', source: 'builtin' },
+        ])
     })
 })
 

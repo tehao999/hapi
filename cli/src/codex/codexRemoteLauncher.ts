@@ -258,6 +258,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let turnInFlight = false;
         let allowAnonymousTerminalEvent = false;
         let manualCompactionInFlight = false;
+        let goalCommandInFlight = false;
         let resolveManualCompactionCompletion: (() => void) | null = null;
         let clearManualCompactionAbortHandler: (() => void) | null = null;
         const mcpToolNamesByCallId = new Map<string, string>();
@@ -652,6 +653,22 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         });
 
         appServerClient.setNotificationHandler((method, params) => {
+            if (
+                goalCommandInFlight &&
+                (
+                    method === 'thread/goal/updated' ||
+                    method === 'thread/goal/cleared' ||
+                    method === 'turn/started' ||
+                    method === 'turn/completed'
+                )
+            ) {
+                logger.debug('[Codex] Ignoring app-server notification emitted by native goal command', { method });
+                return;
+            }
+            if (method === 'turn/started' && !turnInFlight && !manualCompactionInFlight) {
+                logger.debug('[Codex] Ignoring app-server turn/started notification with no HAPI turn in flight');
+                return;
+            }
             const events = appServerEventConverter.handleNotification(method, params);
             for (const event of events) {
                 const eventRecord = asRecord(event) ?? { type: undefined };
@@ -853,6 +870,64 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                             turnInFlight = false;
                             allowAnonymousTerminalEvent = false;
                         }
+                    }
+                    continue;
+                }
+
+                if (specialCommand.type === 'goal') {
+                    if (!this.currentThreadId) {
+                        session.sendAgentMessage({
+                            type: 'task_failed',
+                            error: 'No Codex thread is available to manage goals.',
+                            id: randomUUID()
+                        });
+                        sendReady();
+                        continue;
+                    }
+
+                    goalCommandInFlight = true;
+                    try {
+                        let responseText = '';
+                        if (specialCommand.goalAction === 'set' && specialCommand.goalText) {
+                            const result = await appServerClient.setThreadGoal({
+                                threadId: this.currentThreadId,
+                                objective: specialCommand.goalText
+                            }, { signal: this.abortController.signal });
+                            responseText = `Goal set: ${result.goal?.objective ?? specialCommand.goalText}`;
+                        } else if (specialCommand.goalAction === 'clear') {
+                            await appServerClient.clearThreadGoal({
+                                threadId: this.currentThreadId
+                            }, { signal: this.abortController.signal });
+                            responseText = `Goal cleared`;
+                        } else {
+                            const result = await appServerClient.getThreadGoal({
+                                threadId: this.currentThreadId
+                            }, { signal: this.abortController.signal });
+                            responseText = result.goal?.objective ? `Current goal: ${result.goal.objective}` : 'No goal is currently set';
+                        }
+
+                        messageBuffer.addMessage(responseText, 'status');
+                        session.sendAgentMessage({
+                            type: 'message',
+                            message: responseText,
+                            id: randomUUID()
+                        });
+                    } catch (error) {
+                        const detail = error instanceof Error ? error.message : String(error);
+                        let messageText = `Failed to manage goal: ${detail}`;
+                        // Gracefully handle older app-server versions that don't support the goal RPC methods
+                        if (/method not found/i.test(detail) || detail.includes('-32601')) {
+                            messageText = 'Your version of Codex does not support the native /goal command. Please update Codex.';
+                        }
+                        logger.warn('[Codex] Failed to manage goal:', error);
+                        messageBuffer.addMessage(messageText, 'status');
+                        session.sendAgentMessage({
+                            type: 'task_failed',
+                            error: messageText,
+                            id: randomUUID()
+                        });
+                    } finally {
+                        goalCommandInFlight = false;
                     }
                     continue;
                 }

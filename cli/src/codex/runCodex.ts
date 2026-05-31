@@ -137,8 +137,8 @@ export async function runCodex(opts: {
         };
 
         const specialCommand = parseSpecialCommand(message.content.text);
-        if (specialCommand.type === 'compact') {
-            const commandText = specialCommand.originalMessage ?? message.content.text;
+        if (specialCommand.type === 'compact' || specialCommand.type === 'goal') {
+            const commandText = (specialCommand.originalMessage ?? message.content.text).trim();
             messageQueue.pushIsolateAndClear(commandText, enhancedMode);
             return;
         }

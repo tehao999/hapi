@@ -7,13 +7,16 @@ const BUILTIN_COMMANDS: Record<string, SlashCommand[]> = {
         { name: 'context', description: 'Visualize current context usage as a colored grid', source: 'builtin' },
         { name: 'cost', description: 'Show the total cost and duration of the current session', source: 'builtin' },
         { name: 'doctor', description: 'Diagnose and verify your Claude Code installation and settings', source: 'builtin' },
+        { name: 'goal', description: 'Set, view, or clear the conversation goal', source: 'builtin' },
         { name: 'plan', description: 'View or open the current session plan', source: 'builtin' },
         { name: 'stats', description: 'Show your Claude Code usage statistics and activity', source: 'builtin' },
         { name: 'status', description: 'Show Claude Code status including version, model, account, and API connectivity', source: 'builtin' },
     ],
     // Codex remote turns send slash-prefixed input as plain text to app-server.
-    // Hide built-ins here until remote slash command execution is implemented end-to-end.
-    codex: [],
+    // We now support goal natively via special commands.
+    codex: [
+        { name: 'goal', description: 'Set, view, or clear the conversation goal', source: 'builtin' },
+    ],
     gemini: [
         { name: 'about', description: 'Show version info', source: 'builtin' },
         { name: 'clear', description: 'Clear the screen and conversation history', source: 'builtin' },

@@ -338,6 +338,14 @@ describe('AppServerEventConverter', () => {
             itemId: 'cmd-1',
             stdin: ''
         })).toEqual([]);
+        expect(converter.handleNotification('thread/goal/updated', {
+            threadId: 'thread-1',
+            turnId: null,
+            goal: { objective: 'finish' }
+        })).toEqual([]);
+        expect(converter.handleNotification('thread/goal/cleared', {
+            threadId: 'thread-1'
+        })).toEqual([]);
 
         expect(debugSpy).not.toHaveBeenCalled();
         debugSpy.mockRestore();

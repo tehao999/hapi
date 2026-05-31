@@ -7,6 +7,8 @@ type ConvertedEvent = {
 
 const BENIGN_NOTIFICATION_METHODS = new Set([
     'thread/status/changed',
+    'thread/goal/updated',
+    'thread/goal/cleared',
     'serverRequest/resolved',
     'item/commandExecution/terminalInteraction',
     'skills/changed'
