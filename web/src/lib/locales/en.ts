@@ -60,6 +60,7 @@ export default {
 
   // Session actions
   'session.action.rename': 'Rename',
+  'session.action.copySessionId': 'Copy HAPI session ID',
   'session.action.archive': 'Archive',
   'session.action.delete': 'Delete',
   'session.action.copy': 'Copy',
