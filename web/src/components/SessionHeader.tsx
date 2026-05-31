@@ -6,7 +6,7 @@ import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { getSessionModelLabel } from '@/lib/sessionModelLabel'
+import { getSessionEffortLabel, getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { useTranslation } from '@/lib/use-translation'
 import { getSessionDisplayTitle } from '@hapi/protocol'
 
@@ -63,6 +63,7 @@ export function SessionHeader(props: {
     const title = useMemo(() => getSessionTitle(session), [session])
     const worktreeBranch = session.metadata?.worktree?.branch
     const modelLabel = getSessionModelLabel(session)
+    const effortLabel = getSessionEffortLabel(session)
 
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -134,6 +135,11 @@ export function SessionHeader(props: {
                             {modelLabel ? (
                                 <span>
                                     {t(modelLabel.key)}: {modelLabel.value}
+                                </span>
+                            ) : null}
+                            {effortLabel ? (
+                                <span>
+                                    {t(effortLabel.key)}: {effortLabel.value}
                                 </span>
                             ) : null}
                             {worktreeBranch ? (

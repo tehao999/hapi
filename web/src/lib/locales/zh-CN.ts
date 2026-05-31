@@ -46,6 +46,7 @@ export default {
   'session.item.path': '路径',
   'session.item.agent': '代理',
   'session.item.model': '模型',
+  'session.item.effort': '思考',
   'session.item.worktree': '工作树',
   'session.item.pending': '待处理',
   'session.item.thinking': '思考中',
