@@ -8,6 +8,8 @@ import type { ChatBlock, CliOutputBlock } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
 
+export const AGENT_ATTACHMENTS_DATA_PART_NAME = 'hapi-agent-attachments'
+
 export type HappyChatMessageMetadata = {
     kind: 'user' | 'assistant' | 'tool' | 'tool-group' | 'event' | 'cli-output'
     status?: HappyMessageStatus
@@ -17,9 +19,18 @@ export type HappyChatMessageMetadata = {
     event?: AgentEvent
     source?: CliOutputBlock['source']
     attachments?: AttachmentMetadata[]
+    timestampSource?: 'completion'
+    timestampAt?: number | null
 }
 
-function toThreadMessageLike(block: ToolDisplayBlock): ThreadMessageLike {
+function getCompletionTimestampMetadata(block: { displayTimestamp?: number | null }): Pick<HappyChatMessageMetadata, 'timestampSource' | 'timestampAt'> {
+    return {
+        timestampSource: 'completion',
+        timestampAt: typeof block.displayTimestamp === 'number' ? block.displayTimestamp : null
+    }
+}
+
+export function toThreadMessageLike(block: ToolDisplayBlock): ThreadMessageLike {
     if (block.kind === 'user-text') {
         const messageId = `user:${block.id}`
         return {
@@ -47,7 +58,10 @@ function toThreadMessageLike(block: ToolDisplayBlock): ThreadMessageLike {
             createdAt: new Date(block.createdAt),
             content: [{ type: 'text', text: block.text }],
             metadata: {
-                custom: { kind: 'assistant' } satisfies HappyChatMessageMetadata
+                custom: {
+                    kind: 'assistant',
+                    ...getCompletionTimestampMetadata(block)
+                } satisfies HappyChatMessageMetadata
             }
         }
     }
@@ -60,7 +74,10 @@ function toThreadMessageLike(block: ToolDisplayBlock): ThreadMessageLike {
             createdAt: new Date(block.createdAt),
             content: [{ type: 'reasoning', text: block.text }],
             metadata: {
-                custom: { kind: 'assistant' } satisfies HappyChatMessageMetadata
+                custom: {
+                    kind: 'assistant',
+                    ...getCompletionTimestampMetadata(block)
+                } satisfies HappyChatMessageMetadata
             }
         }
     }
@@ -71,11 +88,19 @@ function toThreadMessageLike(block: ToolDisplayBlock): ThreadMessageLike {
             role: 'assistant',
             id: messageId,
             createdAt: new Date(block.createdAt),
-            content: [{ type: 'text', text: '' }],
+            content: [{
+                type: 'data' as const,
+                name: AGENT_ATTACHMENTS_DATA_PART_NAME,
+                data: {
+                    attachments: block.attachments
+                }
+            }],
             metadata: {
                 custom: {
                     kind: 'assistant',
-                    attachments: block.attachments
+                    localId: block.localId,
+                    attachments: block.attachments,
+                    ...getCompletionTimestampMetadata(block)
                 } satisfies HappyChatMessageMetadata
             }
         }
@@ -102,7 +127,11 @@ function toThreadMessageLike(block: ToolDisplayBlock): ThreadMessageLike {
             createdAt: new Date(block.createdAt),
             content: [{ type: 'text', text: block.text }],
             metadata: {
-                custom: { kind: 'cli-output', source: block.source } satisfies HappyChatMessageMetadata
+                custom: {
+                    kind: 'cli-output',
+                    source: block.source,
+                    ...(block.source === 'assistant' ? getCompletionTimestampMetadata(block) : {})
+                } satisfies HappyChatMessageMetadata
             }
         }
     }
@@ -124,7 +153,11 @@ function toThreadMessageLike(block: ToolDisplayBlock): ThreadMessageLike {
                 artifact: block
             }],
             metadata: {
-                custom: { kind: 'tool-group', toolCallId: block.id } satisfies HappyChatMessageMetadata
+                custom: {
+                    kind: 'tool-group',
+                    toolCallId: block.id,
+                    ...getCompletionTimestampMetadata(block)
+                } satisfies HappyChatMessageMetadata
             }
         }
     }
@@ -147,7 +180,11 @@ function toThreadMessageLike(block: ToolDisplayBlock): ThreadMessageLike {
             artifact: toolBlock
         }],
         metadata: {
-            custom: { kind: 'tool', toolCallId: toolBlock.id } satisfies HappyChatMessageMetadata
+            custom: {
+                kind: 'tool',
+                toolCallId: toolBlock.id,
+                ...getCompletionTimestampMetadata(toolBlock)
+            } satisfies HappyChatMessageMetadata
         }
     }
 }
