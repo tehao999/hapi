@@ -7,6 +7,7 @@ import { MessageAttachments } from '@/components/AssistantChat/messages/MessageA
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { HappyMessageTimestamp } from '@/components/AssistantChat/messages/MessageTimestamp'
 
 export function HappyUserMessage() {
     const ctx = useHappyChatContext()
@@ -52,6 +53,7 @@ export function HappyUserMessage() {
             <MessagePrimitive.Root className="px-1 min-w-0 max-w-full overflow-x-hidden">
                 <div className="ml-auto w-full max-w-[92%]">
                     <CliOutputBlock text={cliText} />
+                    <HappyMessageTimestamp align="right" className="mt-1" />
                 </div>
             </MessagePrimitive.Root>
         )
@@ -85,6 +87,7 @@ export function HappyUserMessage() {
                     </div>
                 )}
             </div>
+            <HappyMessageTimestamp align="right" className="mt-1" />
         </MessagePrimitive.Root>
     )
 }
