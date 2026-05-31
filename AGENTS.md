@@ -60,6 +60,23 @@ Bun workspaces; `shared` consumed by cli, hub, web.
 - Prefer 4-space indentation
 - Zod for runtime validation (schemas in `shared/src/schemas.ts`)
 
+## HAPI maintenance closure
+
+When changing HAPI itself (source, tests, docs, agent instructions, scripts, config, runtime
+maintenance notes), finish the slice instead of leaving task-created dirt behind:
+
+- Verify with commands that match the touched surface (`bun typecheck`, focused tests, build,
+  `git diff --check`, or runtime smoke/doctor when operational behavior changes).
+- If the user requested review, or the change affects stability, routing, permissions, model
+  selection, agent bridges, or maintenance policy, run external review before finalizing. Prefer
+  Codex + Claude-DeepSeek when the user asks for the two-reviewer gate.
+- Read review results from the recorded artifact paths, fix any `FAIL`/`BLOCKED` findings, then
+  rerun the relevant verification/review loop.
+- After verification and required review pass, commit the exact touched paths. Do not leave this
+  task's HAPI changes uncommitted.
+- Keep unrelated dirty files separate: no `git add .`, broad `git reset`, broad `git stash`, or
+  `git clean` unless the user explicitly authorizes that cleanup.
+
 ## Common commands (repo root)
 
 ```bash
