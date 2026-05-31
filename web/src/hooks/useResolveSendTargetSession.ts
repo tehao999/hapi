@@ -18,7 +18,7 @@ export function describeResolveSendTargetSession(
         messages
     })
 
-    if (isDesktopMirror && control?.owner === 'desktop-sync') {
+    if (isDesktopMirror && control?.owner !== 'hapi-runner') {
         return { action: 'takeover' }
     }
     if (!session.active) {

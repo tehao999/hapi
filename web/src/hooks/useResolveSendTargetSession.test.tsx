@@ -66,14 +66,7 @@ describe('useResolveSendTargetSession', () => {
             metadata: {
                 path: '/tmp/project',
                 host: 'localhost',
-                flavor: 'codex',
-                executionControl: {
-                    owner: 'desktop-sync',
-                    generation: 1,
-                    leaseExpiresAt: null,
-                    runnerSessionId: null,
-                    updatedAt: 1
-                }
+                flavor: 'codex'
             }
         })
         const result = useResolveSendTargetSession(api, session, [makeDesktopMirrorMessage()])
@@ -112,11 +105,30 @@ describe('describeResolveSendTargetSession', () => {
         expect(describeResolveSendTargetSession(makeSession(), [])).toEqual({ action: 'takeover' })
     })
 
+    it('describes takeover for a message-only desktop mirror without execution control', () => {
+        expect(describeResolveSendTargetSession(makeSession({
+            metadata: { path: '/tmp/project', host: 'localhost', flavor: 'codex' }
+        }), [makeDesktopMirrorMessage()])).toEqual({ action: 'takeover' })
+    })
+
     it('describes resume for an inactive non-mirror session', () => {
         expect(describeResolveSendTargetSession(makeSession({
             active: false,
             metadata: { path: '/tmp/project', host: 'localhost', flavor: 'codex' }
         }), [])).toEqual({ action: 'resume' })
+    })
+
+    it('describes native HAPI runner sessions as resumable rather than desktop takeover targets', () => {
+        expect(describeResolveSendTargetSession(makeSession({
+            active: false,
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'codex',
+                startedFromRunner: true,
+                startedBy: 'runner'
+            }
+        }), [makeDesktopMirrorMessage()])).toEqual({ action: 'resume' })
     })
 
     it('describes none for an active native session', () => {
