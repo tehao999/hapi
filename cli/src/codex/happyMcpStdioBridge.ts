@@ -16,11 +16,14 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
+  clearGoalInputSchema,
   changeTitleInputSchema,
-  sendAttachmentInputSchema
+  getGoalInputSchema,
+  sendAttachmentInputSchema,
+  setGoalInputSchema
 } from '@/claude/utils/hapiMcpTools';
 
-type HapiBridgeToolName = 'change_title' | 'send_attachment';
+type HapiBridgeToolName = 'change_title' | 'send_attachment' | 'get_goal' | 'set_goal' | 'clear_goal';
 
 type HapiBridgeServer = {
   registerTool: (...args: any[]) => void;
@@ -30,27 +33,40 @@ type HapiBridgeHttpClient = {
   callTool(request: { name: string; arguments: Record<string, unknown> }): Promise<any>;
 };
 
-function parseArgs(argv: string[]): { url: string | null } {
+function parseArgs(argv: string[]): { url: string | null; includeGoalTools: boolean } {
   let url: string | null = null;
+  let includeGoalTools = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--url' && i + 1 < argv.length) {
       url = argv[i + 1];
       i++;
+    } else if (a === '--goal-tools') {
+      includeGoalTools = true;
     }
   }
-  return { url };
+  return { url, includeGoalTools };
 }
 
 function getBridgeToolErrorPrefix(toolName: HapiBridgeToolName): string {
-  return toolName === 'change_title'
-    ? 'Failed to change chat title'
-    : 'Failed to send attachment';
+  switch (toolName) {
+    case 'change_title':
+      return 'Failed to change chat title';
+    case 'send_attachment':
+      return 'Failed to send attachment';
+    case 'get_goal':
+      return 'Failed to get goal';
+    case 'set_goal':
+      return 'Failed to set goal';
+    case 'clear_goal':
+      return 'Failed to clear goal';
+  }
 }
 
 export function registerHapiBridgeTools(
   server: HapiBridgeServer,
-  ensureHttpClient: () => Promise<HapiBridgeHttpClient>
+  ensureHttpClient: () => Promise<HapiBridgeHttpClient>,
+  options: { includeGoalTools?: boolean } = {}
 ): void {
   const tools: Array<{
     name: HapiBridgeToolName;
@@ -75,6 +91,32 @@ export function registerHapiBridgeTools(
       inputSchema: sendAttachmentInputSchema,
     },
   ];
+
+  if (options.includeGoalTools) {
+    tools.push(
+      {
+        name: 'get_goal',
+        description: 'Get the current HAPI/Codex conversation goal for this thread.',
+        title: 'Get Goal',
+        inputSchema: getGoalInputSchema,
+      },
+      {
+        name: 'set_goal',
+        description: [
+          'Set or replace the current HAPI/Codex conversation goal for this thread.',
+          'Use this instead of native create_goal when creating or replacing a goal.'
+        ].join(' '),
+        title: 'Set Goal',
+        inputSchema: setGoalInputSchema,
+      },
+      {
+        name: 'clear_goal',
+        description: 'Clear the current HAPI/Codex conversation goal for this thread.',
+        title: 'Clear Goal',
+        inputSchema: clearGoalInputSchema,
+      }
+    );
+  }
 
   for (const tool of tools) {
     server.registerTool(
@@ -106,7 +148,7 @@ export function registerHapiBridgeTools(
 export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
   try {
     // Resolve target HTTP MCP URL
-    const { url: urlFromArgs } = parseArgs(argv);
+    const { url: urlFromArgs, includeGoalTools } = parseArgs(argv);
     const baseUrl = urlFromArgs || process.env.HAPI_HTTP_MCP_URL || '';
 
     if (!baseUrl) {
@@ -138,7 +180,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       version: '1.0.0',
     });
 
-    registerHapiBridgeTools(server, ensureHttpClient);
+    registerHapiBridgeTools(server, ensureHttpClient, { includeGoalTools });
 
     // Start STDIO transport
     const stdio = new StdioServerTransport();

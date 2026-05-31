@@ -46,4 +46,32 @@ describe('registerHapiBridgeTools', () => {
             arguments: args
         })
     })
+
+    it('registers and forwards Codex goal tools when enabled', async () => {
+        const { server, tools } = createServerHarness()
+        const callTool = vi.fn(async (request: unknown) => ({
+            content: [{ type: 'text', text: 'ok' }],
+            isError: false,
+            request
+        }))
+
+        registerHapiBridgeTools(server, async () => ({ callTool }), { includeGoalTools: true })
+
+        expect(tools.map((tool) => tool.name)).toEqual([
+            'change_title',
+            'send_attachment',
+            'get_goal',
+            'set_goal',
+            'clear_goal'
+        ])
+
+        const setGoal = tools.find((tool) => tool.name === 'set_goal')
+        expect(setGoal).toBeDefined()
+        await setGoal!.handler({ objective: 'new goal' })
+
+        expect(callTool).toHaveBeenCalledWith({
+            name: 'set_goal',
+            arguments: { objective: 'new goal' }
+        })
+    })
 })

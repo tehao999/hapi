@@ -5,6 +5,7 @@ import {
 } from './agentAttachment'
 
 export const HAPI_MCP_TOOL_NAMES = ['change_title', 'send_attachment'] as const
+export const HAPI_GOAL_MCP_TOOL_NAMES = ['get_goal', 'set_goal', 'clear_goal'] as const
 
 export const changeTitleInputSchema = z.object({
     title: z.string().describe('The new title for the chat session')
@@ -23,6 +24,27 @@ export const sendAttachmentInputSchema = z.object({
         .describe('Generated files to send to the user as chat attachments')
 })
 
+export const goalStatusInputSchema = z.enum([
+    'active',
+    'paused',
+    'blocked',
+    'usageLimited',
+    'budgetLimited',
+    'complete'
+])
+
+export const getGoalInputSchema = z.object({})
+
+export const setGoalInputSchema = z.object({
+    objective: z.string().trim().min(1).max(2000).describe('The goal objective text'),
+    status: goalStatusInputSchema.optional().describe('Optional goal status. Omit to set an active goal.'),
+    tokenBudget: z.number().int().positive().optional().describe('Optional positive token budget for the goal')
+})
+
+export const clearGoalInputSchema = z.object({})
+
 export type SendAttachmentInput = {
     files: AgentAttachmentFileInput[]
 }
+
+export type SetGoalInput = z.infer<typeof setGoalInputSchema>

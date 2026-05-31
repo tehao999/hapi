@@ -19,7 +19,23 @@ import {
     type SendAttachmentInput
 } from "./hapiMcpTools";
 
-export async function startHappyServer(client: ApiSessionClient) {
+export type HapiMcpToolResult = {
+    content: Array<{ type: 'text'; text: string }>;
+    isError: boolean;
+};
+
+export type HapiMcpToolRegistration = {
+    name: string;
+    description: string;
+    title: string;
+    inputSchema: unknown;
+    handler: (args: Record<string, unknown>) => Promise<HapiMcpToolResult>;
+};
+
+export async function startHappyServer(
+    client: ApiSessionClient,
+    options: { extraTools?: HapiMcpToolRegistration[] } = {}
+) {
     // Handler that sends title updates via the client
     const handler = async (title: string) => {
         logger.debug('[hapiMCP] Changing title to:', title);
@@ -131,6 +147,14 @@ export async function startHappyServer(client: ApiSessionClient) {
         }
     });
 
+    for (const tool of options.extraTools ?? []) {
+        mcp.registerTool<any, any>(tool.name, {
+            description: tool.description,
+            title: tool.title,
+            inputSchema: tool.inputSchema,
+        }, async (args: Record<string, unknown>) => tool.handler(args));
+    }
+
     const transport = new StreamableHTTPServerTransport({
         // NOTE: Returning session id here will result in claude
         // sdk spawn to fail with `Invalid Request: Server already initialized`
@@ -162,7 +186,10 @@ export async function startHappyServer(client: ApiSessionClient) {
 
     return {
         url: baseUrl.toString(),
-        toolNames: [...HAPI_MCP_TOOL_NAMES],
+        toolNames: [
+            ...HAPI_MCP_TOOL_NAMES,
+            ...(options.extraTools ?? []).map((tool) => tool.name)
+        ],
         stop: () => {
             logger.debug('[hapiMCP] Stopping server');
             mcp.close();

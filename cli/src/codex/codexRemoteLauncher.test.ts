@@ -14,6 +14,8 @@ const harness = vi.hoisted(() => ({
     goalClearCalls: [] as unknown[],
     goalGetResponse: null as null | { goal: unknown },
     goalError: null as Error | null,
+    mcpExtraTools: [] as Array<{ name: string; handler: (args: Record<string, unknown>) => Promise<unknown> }>,
+    afterTurnStarted: null as null | (() => Promise<void> | void),
     emitTurnStartedDuringGoalSet: false,
     emitTurnStartedAfterGoalSet: false,
     compactError: null as Error | null,
@@ -72,6 +74,7 @@ vi.mock('./codexAppServerClient', () => {
             const started = { turn: script?.startedTurnId ? { id: script.startedTurnId } : {} };
             harness.notifications.push({ method: 'turn/started', params: started });
             this.notificationHandler?.('turn/started', started);
+            await harness.afterTurnStarted?.();
 
             if (script?.extraStartedTurnIdBeforeCompletion) {
                 const extraStarted = { turn: { id: script.extraStartedTurnIdBeforeCompletion } };
@@ -274,12 +277,16 @@ vi.mock('./codexAppServerClient', () => {
 });
 
 vi.mock('./utils/buildHapiMcpBridge', () => ({
-    buildHapiMcpBridge: async () => ({
+    buildHapiMcpBridge: async (_client: unknown, options?: { extraTools?: typeof harness.mcpExtraTools }) => {
+        harness.registerRequestCalls.push(`mcp-tools:${options?.extraTools?.length ?? 0}`);
+        harness.mcpExtraTools = options?.extraTools ?? [];
+        return {
         server: {
             stop: () => {}
         },
         mcpServers: {}
-    })
+        };
+    }
 }));
 
 vi.mock('./utils/codexThreadTitle', () => ({
@@ -430,6 +437,8 @@ describe('codexRemoteLauncher', () => {
         harness.goalClearCalls = [];
         harness.goalGetResponse = null;
         harness.goalError = null;
+        harness.mcpExtraTools = [];
+        harness.afterTurnStarted = null;
         harness.emitTurnStartedDuringGoalSet = false;
         harness.emitTurnStartedAfterGoalSet = false;
         harness.compactError = null;
@@ -751,7 +760,8 @@ describe('codexRemoteLauncher', () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         expect(harness.goalSetCalls).toEqual([{
             threadId: 'thread-anonymous',
-            objective: 'finish the HAPI goal fix'
+            objective: 'finish the HAPI goal fix',
+            status: 'active'
         }]);
         expect(harness.startTurnCalls).toEqual([]);
         expect(codexMessages).toContainEqual(expect.objectContaining({
@@ -761,6 +771,67 @@ describe('codexRemoteLauncher', () => {
         expect(thinkingChanges).not.toContain(true);
         expect(session.thinking).toBe(false);
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('clears terminal completed goals before starting a normal turn so native create_goal can be reused', async () => {
+        harness.goalGetResponse = {
+            goal: {
+                threadId: 'thread-anonymous',
+                objective: 'old completed goal',
+                status: 'complete',
+                tokenBudget: null,
+                tokensUsed: 42,
+                timeUsedSeconds: 7,
+                createdAt: 1,
+                updatedAt: 2
+            }
+        };
+        const { session, codexMessages } = createSessionStub('please create a new long goal');
+        session.sessionId = 'thread-anonymous';
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.goalGetCalls).toContainEqual({ threadId: 'thread-anonymous' });
+        expect(harness.goalClearCalls).toEqual([{ threadId: 'thread-anonymous' }]);
+        expect(harness.startTurnCalls).toHaveLength(1);
+        expect(codexMessages).not.toContainEqual(expect.objectContaining({
+            message: expect.stringContaining('Goal cleared')
+        }));
+    });
+
+    it('suppresses goal MCP side-effect turn notifications during an active Codex turn', async () => {
+        harness.emitTurnStartedDuringGoalSet = true;
+        harness.turnScripts = [{
+            startedTurnId: 'main-turn',
+            responseTurnId: 'main-turn',
+            completionTurnId: 'main-turn',
+            advanceBeforeCompletionMs: 12_345
+        }];
+        vi.spyOn(Date, 'now').mockImplementation(() => harness.nowMs);
+        harness.afterTurnStarted = async () => {
+            const setGoal = harness.mcpExtraTools.find((tool) => tool.name === 'set_goal');
+            expect(setGoal).toBeDefined();
+            await setGoal!.handler({ objective: 'goal from MCP' });
+        };
+        const {
+            session,
+            sessionEvents
+        } = createSessionStub('normal turn that uses HAPI set_goal');
+        session.sessionId = 'thread-anonymous';
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.goalSetCalls).toContainEqual({
+            threadId: 'thread-anonymous',
+            objective: 'goal from MCP',
+            status: 'active'
+        });
+        const durations = sessionEvents
+            .filter((event) => event.type === 'turn-duration')
+            .map((event) => event.durationMs);
+        expect(durations).toEqual([12_345]);
     });
 
     it('renders the current native Codex goal objective from app-server get response', async () => {
@@ -827,7 +898,8 @@ describe('codexRemoteLauncher', () => {
         expect(exitReason).toBe('exit');
         expect(harness.goalSetCalls).toEqual([{
             threadId: 'thread-anonymous',
-            objective: 'finish the HAPI goal fix'
+            objective: 'finish the HAPI goal fix',
+            status: 'active'
         }]);
         expect(harness.startTurnCalls).toEqual([]);
         expect(codexMessages).toContainEqual(expect.objectContaining({

@@ -19,7 +19,15 @@ export const TITLE_INSTRUCTION = trimIdent(`
     If the task focus changes significantly later, call the title tool again with a better title.
 `);
 
+export const GOAL_INSTRUCTION = trimIdent(`
+    Goal management on HAPI:
+    - If HAPI goal tools are available, use functions.hapi__set_goal (or mcp__hapi__set_goal / hapi__set_goal) to create, replace, or update the conversation goal.
+    - Use functions.hapi__get_goal to inspect the current HAPI/Codex goal, and functions.hapi__clear_goal only when the user asks to clear it or when replacing a terminal completed/budget-limited goal.
+    - Do not use the native create_goal tool to create or replace HAPI Codex goals; it is create-only and can fail when a completed prior goal still exists.
+    - If the user explicitly sends /goal, HAPI handles that slash command directly.
+`);
+
 /**
  * The system prompt to inject via developer_instructions in local mode.
  */
-export const codexSystemPrompt = TITLE_INSTRUCTION;
+export const codexSystemPrompt = `${TITLE_INSTRUCTION}\n\n${GOAL_INSTRUCTION}`;

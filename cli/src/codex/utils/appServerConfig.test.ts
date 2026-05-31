@@ -27,6 +27,11 @@ describe('appServerConfig', () => {
         });
     });
 
+    it('injects HAPI goal guidance for Codex app-server threads', () => {
+        expect(codexSystemPrompt).toContain('set_goal');
+        expect(codexSystemPrompt).toContain('create_goal');
+    });
+
     it('uses on-request approvals for default Codex threads', () => {
         const params = buildThreadStartParams({
             cwd: '/workspace/project',

@@ -18,6 +18,11 @@ import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerC
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
 import { createCodexThreadTitlePoller, syncCodexThreadTitleToMetadata } from './utils/codexThreadTitle';
 import { compactToolOutputForHapi } from './utils/toolOutputCompaction';
+import {
+    clearTerminalCodexGoal,
+    createCodexGoalMcpTools,
+    setCodexThreadGoalReplacingTerminal
+} from './utils/hapiGoalTools';
 import { parseSpecialCommand } from '@/parsers/specialCommands';
 import {
     RemoteLauncherBase,
@@ -259,6 +264,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let allowAnonymousTerminalEvent = false;
         let manualCompactionInFlight = false;
         let goalCommandInFlight = false;
+        let goalNotificationSuppressionDepth = 0;
         let resolveManualCompactionCompletion: (() => void) | null = null;
         let clearManualCompactionAbortHandler: (() => void) | null = null;
         const mcpToolNamesByCallId = new Map<string, string>();
@@ -285,6 +291,17 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     signal.removeEventListener('abort', abortHandler);
                 };
             });
+        };
+
+        const runWithGoalNotificationSuppression = async <T,>(action: () => Promise<T>): Promise<T> => {
+            goalNotificationSuppressionDepth += 1;
+            goalCommandInFlight = true;
+            try {
+                return await action();
+            } finally {
+                goalNotificationSuppressionDepth = Math.max(0, goalNotificationSuppressionDepth - 1);
+                goalCommandInFlight = goalNotificationSuppressionDepth > 0;
+            }
         };
 
         const startTurnDurationIfNeeded = (turnId?: string | null) => {
@@ -676,7 +693,15 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
         });
 
-        const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
+        const goalTools = createCodexGoalMcpTools({
+            client: appServerClient,
+            getThreadId: () => this.currentThreadId,
+            getSignal: () => this.abortController.signal,
+            runWithGoalNotificationSuppression
+        });
+        const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client, {
+            extraTools: goalTools
+        });
         this.happyServer = happyServer;
 
         this.setupAbortHandlers(session.client.rpcHandlerManager, {
@@ -875,7 +900,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 }
 
                 if (specialCommand.type === 'goal') {
-                    if (!this.currentThreadId) {
+                    const goalThreadId = this.currentThreadId;
+                    if (!goalThreadId) {
                         session.sendAgentMessage({
                             type: 'task_failed',
                             error: 'No Codex thread is available to manage goals.',
@@ -885,26 +911,26 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         continue;
                     }
 
-                    goalCommandInFlight = true;
                     try {
-                        let responseText = '';
-                        if (specialCommand.goalAction === 'set' && specialCommand.goalText) {
-                            const result = await appServerClient.setThreadGoal({
-                                threadId: this.currentThreadId,
-                                objective: specialCommand.goalText
-                            }, { signal: this.abortController.signal });
-                            responseText = `Goal set: ${result.goal?.objective ?? specialCommand.goalText}`;
-                        } else if (specialCommand.goalAction === 'clear') {
-                            await appServerClient.clearThreadGoal({
-                                threadId: this.currentThreadId
-                            }, { signal: this.abortController.signal });
-                            responseText = `Goal cleared`;
-                        } else {
+                        const responseText = await runWithGoalNotificationSuppression(async () => {
+                            if (specialCommand.goalAction === 'set' && specialCommand.goalText) {
+                                const result = await setCodexThreadGoalReplacingTerminal(appServerClient, {
+                                    threadId: goalThreadId,
+                                    objective: specialCommand.goalText
+                                }, { signal: this.abortController.signal });
+                                return `Goal set: ${result.goal?.objective ?? specialCommand.goalText}`;
+                            }
+                            if (specialCommand.goalAction === 'clear') {
+                                await appServerClient.clearThreadGoal({
+                                    threadId: goalThreadId
+                                }, { signal: this.abortController.signal });
+                                return `Goal cleared`;
+                            }
                             const result = await appServerClient.getThreadGoal({
-                                threadId: this.currentThreadId
+                                threadId: goalThreadId
                             }, { signal: this.abortController.signal });
-                            responseText = result.goal?.objective ? `Current goal: ${result.goal.objective}` : 'No goal is currently set';
-                        }
+                            return result.goal?.objective ? `Current goal: ${result.goal.objective}` : 'No goal is currently set';
+                        });
 
                         messageBuffer.addMessage(responseText, 'status');
                         session.sendAgentMessage({
@@ -926,14 +952,34 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                             error: messageText,
                             id: randomUUID()
                         });
-                    } finally {
-                        goalCommandInFlight = false;
                     }
                     continue;
                 }
 
                 const sessionModelReasoningEffort = session.getModelReasoningEffort();
                 const sessionServiceTier = session.getServiceTier();
+                const currentThreadId = this.currentThreadId;
+                if (!currentThreadId) {
+                    throw new Error('No Codex thread is available to start a turn.');
+                }
+                try {
+                    const clearedGoal = await runWithGoalNotificationSuppression(
+                        () => clearTerminalCodexGoal(
+                            appServerClient,
+                            currentThreadId,
+                            { signal: this.abortController.signal }
+                        )
+                    );
+                    if (clearedGoal) {
+                        logger.debug('[Codex] Cleared terminal goal before starting a normal turn', {
+                            threadId: this.currentThreadId,
+                            status: clearedGoal.status,
+                            objective: clearedGoal.objective
+                        });
+                    }
+                } catch (error) {
+                    logger.debug('[Codex] Skipping terminal goal cleanup before turn:', error);
+                }
                 const turnParams = buildTurnStartParams({
                     threadId: this.currentThreadId,
                     message: message.message,
