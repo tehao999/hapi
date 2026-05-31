@@ -1,6 +1,7 @@
 import type { NormalizedMessage } from '@/chat/types'
 import type { AttachmentMetadata } from '@/types/api'
 import { isObject } from '@hapi/protocol'
+import { getSafeAttachmentPreviewUrl } from '@/lib/safeAttachmentPreviewUrl'
 
 const CODEX_SYNC_PSEUDO_USER_PREFIXES = [
     '<subagent_notification>',
@@ -25,7 +26,7 @@ function parseAttachments(raw: unknown): AttachmentMetadata[] | undefined {
                 mimeType: item.mimeType,
                 size: item.size,
                 path: item.path,
-                previewUrl: typeof item.previewUrl === 'string' ? item.previewUrl : undefined
+                previewUrl: getSafeAttachmentPreviewUrl(item.previewUrl, item.mimeType)
             })
         }
     }

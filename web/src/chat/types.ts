@@ -62,11 +62,16 @@ export type NormalizedAgentContent =
         uuid: string
         parentUUID: string | null
     }
+    | {
+        type: 'attachments'
+        attachments: AttachmentMetadata[]
+        uuid: string
+        parentUUID: string | null
+    }
     | ToolUse
     | ToolResult
     | { type: 'summary'; summary: string }
     | { type: 'sidechain'; uuid: string; parentUUID: string | null; prompt: string }
-    | { type: 'attachments'; attachments: AttachmentMetadata[] }
 
 export type NormalizedMessage = ({
     role: 'user'
@@ -131,6 +136,7 @@ export type AgentTextBlock = {
     id: string
     localId: string | null
     createdAt: number
+    displayTimestamp?: number | null
     text: string
     meta?: unknown
 }
@@ -140,15 +146,17 @@ export type AgentReasoningBlock = {
     id: string
     localId: string | null
     createdAt: number
+    displayTimestamp?: number | null
     text: string
     meta?: unknown
 }
 
-export type AgentAttachmentsBlock = {
+export type AgentAttachmentBlock = {
     kind: 'agent-attachments'
     id: string
     localId: string | null
     createdAt: number
+    displayTimestamp?: number | null
     attachments: AttachmentMetadata[]
     meta?: unknown
 }
@@ -158,6 +166,7 @@ export type CliOutputBlock = {
     id: string
     localId: string | null
     createdAt: number
+    displayTimestamp?: number | null
     text: string
     source: 'user' | 'assistant'
     meta?: unknown
@@ -176,9 +185,10 @@ export type ToolCallBlock = {
     id: string
     localId: string | null
     createdAt: number
+    displayTimestamp?: number | null
     tool: ChatToolCall
     children: ChatBlock[]
     meta?: unknown
 }
 
-export type ChatBlock = UserTextBlock | AgentTextBlock | AgentReasoningBlock | AgentAttachmentsBlock | CliOutputBlock | ToolCallBlock | AgentEventBlock
+export type ChatBlock = UserTextBlock | AgentTextBlock | AgentReasoningBlock | AgentAttachmentBlock | CliOutputBlock | ToolCallBlock | AgentEventBlock

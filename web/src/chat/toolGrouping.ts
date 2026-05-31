@@ -7,6 +7,7 @@ export type ToolGroupBlock = {
     id: string
     localId: string | null
     createdAt: number
+    displayTimestamp?: number | null
     tools: ToolCallBlock[]
 }
 
@@ -41,6 +42,7 @@ function toToolGroup(tools: ToolCallBlock[]): ToolGroupBlock {
         id: `tool-group:${first.id}`,
         localId: null,
         createdAt: first.createdAt,
+        displayTimestamp: first.displayTimestamp ?? null,
         tools
     }
 }

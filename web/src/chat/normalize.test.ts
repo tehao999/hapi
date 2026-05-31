@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import { normalizeDecryptedMessage } from './normalize'
 import type { DecryptedMessage } from '@/types/api'
 
@@ -378,6 +377,54 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('sanitizes user attachment preview URLs while keeping attachment metadata', () => {
+        const safe = {
+            id: 'user-att-safe',
+            filename: 'upload.png',
+            mimeType: 'image/png',
+            size: 8,
+            path: 'hapi-upload://user-att-safe/upload.png',
+            previewUrl: 'data:image/png;base64,iVBORw0KGgo='
+        }
+        const unsafe = {
+            id: 'user-att-unsafe',
+            filename: 'page.html',
+            mimeType: 'text/html',
+            size: 30,
+            path: 'hapi-upload://user-att-unsafe/page.html',
+            previewUrl: 'data:text/html;base64,PHNjcmlwdD48L3NjcmlwdD4='
+        }
+        const message = makeMessage({
+            role: 'user',
+            content: {
+                type: 'text',
+                text: 'Please inspect these files',
+                attachments: [safe, unsafe, { ...safe, id: 'user-att-js', previewUrl: 'javascript:alert(1)' }]
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+
+        expect(normalized).not.toBeNull()
+        if (normalized?.role !== 'user') throw new Error('Expected user')
+        expect(normalized.content.attachments).toEqual([
+            safe,
+            {
+                id: unsafe.id,
+                filename: unsafe.filename,
+                mimeType: unsafe.mimeType,
+                size: unsafe.size,
+                path: unsafe.path,
+                previewUrl: undefined
+            },
+            {
+                ...safe,
+                id: 'user-att-js',
+                previewUrl: undefined
+            }
+        ])
+    })
+
     it('treats sidechain user output with mixed tool_result + text array as sidechain', () => {
         const message = makeMessage({
             role: 'agent',
@@ -408,80 +455,144 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
-    it('normalizes agent-sent attachment payloads as visible assistant content', () => {
+    it('normalizes codex agent attachment payloads', () => {
         const attachment = {
             id: 'agent-att-1',
-            filename: 'report.txt',
-            mimeType: 'text/plain',
-            size: 5,
-            path: 'hapi-agent-inline://agent-att-1/report.txt',
-            previewUrl: 'data:text/plain;base64,aGVsbG8='
+            filename: 'report.csv',
+            mimeType: 'text/csv',
+            size: 8,
+            path: 'hapi-agent-inline://agent-att-1/report.csv',
+            previewUrl: 'data:text/csv;base64,YSxiCjEsMgo='
         }
         const message = makeMessage({
             role: 'agent',
             content: {
-                type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                type: 'codex',
                 data: {
                     type: 'attachments',
-                    attachments: [attachment]
+                    attachments: [attachment, { id: 'missing-required-fields' }]
                 }
             }
         })
 
         const normalized = normalizeDecryptedMessage(message)
 
-        expect(normalized).toMatchObject({
-            id: 'msg-1',
-            role: 'agent',
-            isSidechain: false,
-            content: [{
-                type: 'attachments',
-                attachments: [attachment]
-            }]
-        })
+        expect(normalized).not.toBeNull()
+        if (normalized?.role !== 'agent') throw new Error('Expected agent')
+        expect(normalized.content).toEqual([{
+            type: 'attachments',
+            attachments: [attachment],
+            uuid: message.id,
+            parentUUID: null
+        }])
     })
 
-    it('strips unsafe preview URLs from agent-sent attachment payloads', () => {
+    it('drops codex agent attachments with unsafe preview URLs', () => {
+        const safe = {
+            id: 'agent-att-safe',
+            filename: 'report.csv',
+            mimeType: 'text/csv',
+            size: 8,
+            path: 'hapi-agent-inline://agent-att-safe/report.csv',
+            previewUrl: 'data:text/csv;base64,YSxiCjEsMgo='
+        }
+        const unsafe = {
+            id: 'agent-att-unsafe',
+            filename: 'page.html',
+            mimeType: 'text/html\u0000',
+            size: 30,
+            path: 'hapi-agent-inline://agent-att-unsafe/page.html',
+            previewUrl: 'data:text/html;base64,PHNjcmlwdD48L3NjcmlwdD4='
+        }
         const message = makeMessage({
             role: 'agent',
             content: {
-                type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                type: 'codex',
                 data: {
                     type: 'attachments',
-                    attachments: [{
-                        id: 'agent-att-unsafe',
-                        filename: 'report.txt',
-                        mimeType: 'text/plain',
-                        size: 5,
-                        path: 'hapi-agent-inline://agent-att-unsafe/report.txt',
-                        previewUrl: 'javascript:alert(1)'
-                    }, {
-                        id: 'agent-att-html',
-                        filename: 'page.txt',
-                        mimeType: 'text/plain',
-                        size: 5,
-                        path: 'hapi-agent-inline://agent-att-html/page.txt',
-                        previewUrl: 'data:text/html;base64,PGh0bWw+'
-                    }, {
-                        id: 'agent-att-svg',
-                        filename: 'image.png',
-                        mimeType: 'image/png',
-                        size: 5,
-                        path: 'hapi-agent-inline://agent-att-svg/image.png',
-                        previewUrl: 'data:image/svg+xml;base64,PHN2Zz4='
-                    }]
+                    attachments: [unsafe, safe, { ...safe, id: 'agent-att-js', previewUrl: 'javascript:alert(1)' }]
                 }
             }
         })
 
         const normalized = normalizeDecryptedMessage(message)
 
-        expect(normalized?.role).toBe('agent')
-        if (normalized?.role !== 'agent') throw new Error('Expected agent message')
-        const block = normalized.content[0]
-        expect(block.type).toBe('attachments')
-        if (block.type !== 'attachments') throw new Error('Expected attachments block')
-        expect(block.attachments).toHaveLength(3)
-        expect(block.attachments.map((attachment) => attachment.previewUrl)).toEqual([undefined, undefined, undefined])
+        expect(normalized).not.toBeNull()
+        if (normalized?.role !== 'agent') throw new Error('Expected agent')
+        expect(normalized.content).toEqual([{
+            type: 'attachments',
+            attachments: [safe],
+            uuid: message.id,
+            parentUUID: null
+        }])
     })
+
+    it('preserves codex tool-call-result error state', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'tool-call-result',
+                    callId: 'call-failed',
+                    output: 'permission denied',
+                    is_error: true
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+
+        expect(normalized).not.toBeNull()
+        if (normalized?.role !== 'agent') throw new Error('Expected agent')
+        expect(normalized.content).toEqual([{
+            type: 'tool-result',
+            tool_use_id: 'call-failed',
+            content: 'permission denied',
+            is_error: true,
+            uuid: message.id,
+            parentUUID: null
+        }])
+    })
+
+    it('drops codex agent attachments whose data-url MIME is not a valid MIME type', () => {
+        const safe = {
+            id: 'agent-att-safe',
+            filename: 'report.csv',
+            mimeType: 'text/csv',
+            size: 8,
+            path: 'hapi-agent-inline://agent-att-safe/report.csv',
+            previewUrl: 'data:text/csv;base64,YSxiCjEsMgo='
+        }
+        const weirdMime = {
+            id: 'agent-att-weird',
+            filename: 'weird.bin',
+            mimeType: '../../evil',
+            size: 8,
+            path: 'hapi-agent-inline://agent-att-weird/weird.bin',
+            previewUrl: 'data:../../evil;base64,AAAA'
+        }
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'attachments',
+                    attachments: [weirdMime, safe]
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+
+        expect(normalized).not.toBeNull()
+        if (normalized?.role !== 'agent') throw new Error('Expected agent')
+        expect(normalized.content).toEqual([{
+            type: 'attachments',
+            attachments: [safe],
+            uuid: message.id,
+            parentUUID: null
+        }])
+    })
+
 })

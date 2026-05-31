@@ -1,33 +1,8 @@
 import type { AgentEvent, NormalizedAgentContent, NormalizedMessage, ToolResultPermission } from '@/chat/types'
-import type { AttachmentMetadata } from '@/types/api'
 import { AGENT_MESSAGE_PAYLOAD_TYPE, asNumber, asString, isObject } from '@hapi/protocol'
 import { isClaudeChatVisibleMessage } from '@hapi/protocol/messages'
-import { getSafeAttachmentPreviewUrl } from '@/lib/safeAttachmentPreviewUrl'
-
-function parseAttachments(raw: unknown): AttachmentMetadata[] | undefined {
-    if (!Array.isArray(raw)) return undefined
-    const attachments: AttachmentMetadata[] = []
-    for (const item of raw) {
-        if (
-            isObject(item) &&
-            typeof item.id === 'string' &&
-            typeof item.filename === 'string' &&
-            typeof item.mimeType === 'string' &&
-            typeof item.size === 'number' &&
-            typeof item.path === 'string'
-        ) {
-            attachments.push({
-                id: item.id,
-                filename: item.filename,
-                mimeType: item.mimeType,
-                size: item.size,
-                path: item.path,
-                previewUrl: getSafeAttachmentPreviewUrl(item.previewUrl)
-            })
-        }
-    }
-    return attachments.length > 0 ? attachments : undefined
-}
+import type { AttachmentMetadata } from '@/types/api'
+import { isSafeAttachmentPreviewUrl } from '@/lib/safeAttachmentPreviewUrl'
 
 function normalizeToolResultPermissions(value: unknown): ToolResultPermission | undefined {
     if (!isObject(value)) return undefined
@@ -57,6 +32,33 @@ function normalizeToolResultPermissions(value: unknown): ToolResultPermission | 
 function normalizeAgentEvent(value: unknown): AgentEvent | null {
     if (!isObject(value) || typeof value.type !== 'string') return null
     return value as AgentEvent
+}
+
+function parseAttachmentMetadata(raw: unknown): AttachmentMetadata[] {
+    if (!Array.isArray(raw)) return []
+    const attachments: AttachmentMetadata[] = []
+    for (const item of raw) {
+        if (
+            isObject(item)
+            && typeof item.id === 'string'
+            && typeof item.filename === 'string'
+            && typeof item.mimeType === 'string'
+            && typeof item.size === 'number'
+            && typeof item.path === 'string'
+        ) {
+            const previewUrl = typeof item.previewUrl === 'string' ? item.previewUrl : undefined
+            if (previewUrl && !isSafeAttachmentPreviewUrl(previewUrl, item.mimeType)) continue
+            attachments.push({
+                id: item.id,
+                filename: item.filename,
+                mimeType: item.mimeType,
+                size: item.size,
+                path: item.path,
+                previewUrl
+            })
+        }
+    }
+    return attachments
 }
 
 function normalizeAssistantOutput(
@@ -402,6 +404,21 @@ export function normalizeAgentRecord(
             }
         }
 
+        if (data.type === 'attachments') {
+            const attachments = parseAttachmentMetadata(data.attachments)
+            if (attachments.length === 0) return null
+            const uuid = asString(data.id) ?? messageId
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'agent',
+                isSidechain: false,
+                content: [{ type: 'attachments', attachments, uuid, parentUUID: null }],
+                meta
+            }
+        }
+
         if (data.type === 'tool-call' && typeof data.callId === 'string') {
             const uuid = asString(data.id) ?? messageId
             return {
@@ -425,6 +442,11 @@ export function normalizeAgentRecord(
 
         if (data.type === 'tool-call-result' && typeof data.callId === 'string') {
             const uuid = asString(data.id) ?? messageId
+            const output = isObject(data.output) ? data.output : null
+            const isError = data.is_error === true
+                || data.isError === true
+                || output?.is_error === true
+                || output?.isError === true
             return {
                 id: messageId,
                 localId,
@@ -435,24 +457,10 @@ export function normalizeAgentRecord(
                     type: 'tool-result',
                     tool_use_id: data.callId,
                     content: data.output,
-                    is_error: false,
+                    is_error: isError,
                     uuid,
                     parentUUID: null
                 }],
-                meta
-            }
-        }
-
-        if (data.type === 'attachments') {
-            const attachments = parseAttachments(data.attachments)
-            if (!attachments) return null
-            return {
-                id: messageId,
-                localId,
-                createdAt,
-                role: 'agent',
-                isSidechain: false,
-                content: [{ type: 'attachments', attachments }],
                 meta
             }
         }
