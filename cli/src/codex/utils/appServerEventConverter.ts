@@ -121,6 +121,17 @@ function isCodexSubagentFunction(name: string, namespace: string | undefined): b
     return !namespace || namespace === 'multi_agent_v1' || name.startsWith('multi_agent_v1.');
 }
 
+function normalizeCollabAgentToolName(value: unknown): 'spawn_agent' | 'wait_agent' | 'close_agent' | null {
+    const raw = asString(value);
+    if (!raw) return null;
+
+    const normalized = raw.toLowerCase().replace(/[\s_-]/g, '');
+    if (normalized === 'spawnagent') return 'spawn_agent';
+    if (normalized === 'wait' || normalized === 'waitagent') return 'wait_agent';
+    if (normalized === 'closeagent') return 'close_agent';
+    return null;
+}
+
 function maybeSet(target: Record<string, unknown>, key: string, value: unknown): void {
     if (value !== null && value !== undefined) {
         target[key] = value;
@@ -223,12 +234,35 @@ function extractReasoningText(item: Record<string, unknown>): string | null {
     return null;
 }
 
+function mergeItemMeta(meta: Record<string, unknown> | undefined, item: Record<string, unknown>): Record<string, unknown> {
+    return meta ? { ...meta, ...item } : item;
+}
+
+function extractCollabAgentIds(item: Record<string, unknown>): string[] {
+    const ids = new Set<string>();
+    for (const id of asStringArray(item.receiverThreadIds ?? item.receiver_thread_ids ?? item.receivers) ?? []) {
+        ids.add(id);
+    }
+
+    const states = asRecord(item.agentsStates ?? item.agents_states ?? item.agentStates);
+    if (states) {
+        for (const id of Object.keys(states)) {
+            if (id.length > 0) {
+                ids.add(id);
+            }
+        }
+    }
+
+    return Array.from(ids);
+}
+
 export class AppServerEventConverter {
     private readonly agentMessageBuffers = new Map<string, string>();
     private readonly reasoningBuffers = new Map<string, string>();
     private readonly commandOutputBuffers = new Map<string, string>();
     private readonly commandMeta = new Map<string, Record<string, unknown>>();
     private readonly functionCallMeta = new Map<string, FunctionCallMeta>();
+    private readonly collabAgentToolMeta = new Map<string, Record<string, unknown>>();
     private readonly fileChangeMeta = new Map<string, Record<string, unknown>>();
     private readonly completedAgentMessageItems = new Set<string>();
     private readonly completedReasoningItems = new Set<string>();
@@ -581,6 +615,70 @@ export class AppServerEventConverter {
                 return events;
             }
 
+            if (itemType === 'collabagenttoolcall') {
+                if (method === 'item/started') {
+                    this.collabAgentToolMeta.set(itemId, item);
+                    return events;
+                }
+
+                const collabItem = mergeItemMeta(this.collabAgentToolMeta.get(itemId), item);
+                this.collabAgentToolMeta.delete(itemId);
+
+                const toolName = normalizeCollabAgentToolName(collabItem.tool ?? collabItem.name ?? collabItem.toolName);
+                if (!toolName) {
+                    return events;
+                }
+
+                const callId = asString(collabItem.call_id ?? collabItem.callId ?? collabItem.id) ?? itemId;
+                const agentIds = extractCollabAgentIds(collabItem);
+                const agentsStates = asRecord(collabItem.agentsStates ?? collabItem.agents_states ?? collabItem.agentStates);
+
+                if (toolName === 'spawn_agent') {
+                    for (const agentId of agentIds) {
+                        const event: ConvertedEvent = {
+                            type: 'codex_subagent_spawned',
+                            call_id: callId,
+                            agent_id: agentId
+                        };
+                        maybeSet(event, 'nickname', asString(collabItem.nickname ?? collabItem.name));
+                        maybeSet(event, 'agent_type', asString(collabItem.agent_type ?? collabItem.agentType ?? collabItem.model));
+                        maybeSet(event, 'message', asString(collabItem.prompt ?? collabItem.message ?? collabItem.description));
+                        events.push(event);
+                    }
+                    return events;
+                }
+
+                if (toolName === 'wait_agent') {
+                    const event: ConvertedEvent = {
+                        type: 'codex_subagent_waited',
+                        call_id: callId
+                    };
+                    const targets = agentIds.length > 0 ? agentIds : null;
+                    if (targets) {
+                        event.targets = targets;
+                    }
+                    if (agentsStates) {
+                        event.status = agentsStates;
+                    }
+                    events.push(event);
+                    return events;
+                }
+
+                if (toolName === 'close_agent') {
+                    const target = agentIds[0] ?? null;
+                    if (!target) {
+                        return events;
+                    }
+                    events.push({
+                        type: 'codex_subagent_closed',
+                        call_id: callId,
+                        target,
+                        ...(agentsStates?.[target] !== undefined ? { previous_status: agentsStates[target] } : {})
+                    });
+                    return events;
+                }
+            }
+
             if (itemType === 'functioncall') {
                 const name = asString(item.name ?? item.tool_name ?? item.toolName);
                 const callId = extractFunctionCallId(paramsRecord, item);
@@ -737,6 +835,7 @@ export class AppServerEventConverter {
         this.commandOutputBuffers.clear();
         this.commandMeta.clear();
         this.functionCallMeta.clear();
+        this.collabAgentToolMeta.clear();
         this.fileChangeMeta.clear();
         this.completedAgentMessageItems.clear();
         this.completedReasoningItems.clear();

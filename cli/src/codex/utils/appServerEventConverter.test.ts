@@ -392,6 +392,84 @@ describe('AppServerEventConverter', () => {
         }]);
     });
 
+    it('maps live app-server collabAgentToolCall lifecycle events for Codex subagents', () => {
+        const converter = new AppServerEventConverter();
+
+        const spawnStarted = converter.handleNotification('item/started', {
+            item: {
+                type: 'collabAgentToolCall',
+                id: 'call-spawn',
+                tool: 'spawnAgent',
+                status: 'inProgress',
+                receiverThreadIds: [],
+                prompt: 'Reply exactly SMOKE_SUBAGENT_OK',
+                agentsStates: {}
+            }
+        });
+        const spawned = converter.handleNotification('item/completed', {
+            item: {
+                type: 'collabAgentToolCall',
+                id: 'call-spawn',
+                tool: 'spawnAgent',
+                status: 'completed',
+                receiverThreadIds: ['thread-child-1'],
+                prompt: 'Reply exactly SMOKE_SUBAGENT_OK',
+                model: 'gpt-5.5',
+                reasoningEffort: 'low',
+                agentsStates: {
+                    'thread-child-1': { status: 'pendingInit', message: null }
+                }
+            }
+        });
+        const waited = converter.handleNotification('item/completed', {
+            item: {
+                type: 'collabAgentToolCall',
+                id: 'call-wait',
+                tool: 'wait',
+                status: 'completed',
+                receiverThreadIds: ['thread-child-1'],
+                agentsStates: {
+                    'thread-child-1': { status: 'completed', message: 'SMOKE_SUBAGENT_OK' }
+                }
+            }
+        });
+        const closed = converter.handleNotification('item/completed', {
+            item: {
+                type: 'collabAgentToolCall',
+                id: 'call-close',
+                tool: 'closeAgent',
+                status: 'completed',
+                receiverThreadIds: ['thread-child-1'],
+                agentsStates: {
+                    'thread-child-1': { status: 'completed', message: 'SMOKE_SUBAGENT_OK' }
+                }
+            }
+        });
+
+        expect(spawnStarted).toEqual([]);
+        expect(spawned).toEqual([{
+            type: 'codex_subagent_spawned',
+            call_id: 'call-spawn',
+            agent_id: 'thread-child-1',
+            agent_type: 'gpt-5.5',
+            message: 'Reply exactly SMOKE_SUBAGENT_OK'
+        }]);
+        expect(waited).toEqual([{
+            type: 'codex_subagent_waited',
+            call_id: 'call-wait',
+            targets: ['thread-child-1'],
+            status: {
+                'thread-child-1': { status: 'completed', message: 'SMOKE_SUBAGENT_OK' }
+            }
+        }]);
+        expect(closed).toEqual([{
+            type: 'codex_subagent_closed',
+            call_id: 'call-close',
+            target: 'thread-child-1',
+            previous_status: { status: 'completed', message: 'SMOKE_SUBAGENT_OK' }
+        }]);
+    });
+
     it('unwraps codex/event reasoning completion from summary text', () => {
         const converter = new AppServerEventConverter();
 
