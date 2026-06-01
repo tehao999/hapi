@@ -27,7 +27,15 @@ export const GOAL_INSTRUCTION = trimIdent(`
     - If the user explicitly sends /goal, HAPI handles that slash command directly.
 `);
 
+export const CAPABILITY_DISCOVERY_INSTRUCTION = trimIdent(`
+    Codex capability discovery on HAPI:
+    - HAPI Codex uses deferred tool loading. Do not conclude a Codex CLI, plugin, connector, MCP, or sub-agent capability is unavailable before searching for it when the user asks for that capability.
+    - When tool_search is available and the user asks for subagents, sub-agents, delegation, parallel agents, or isolated agents, first search: multi agent spawn_agent subagent. If multi_agent_v1.spawn_agent or an equivalent sub-agent tool is found, use it when the user requested real subagents.
+    - When tool_search is available and the user asks for browser, Chrome, UI automation, GitHub, Gmail, Figma, documents, spreadsheets, presentations, OpenAI docs, node/JavaScript REPL, or plugin-specific behavior, first search for the matching tool or plugin namespace before saying it is unavailable.
+    - "final answer text only" or "only output text" means the visible final answer should be text; it does not forbid internal tool calls. Treat internal tools as forbidden only when the user explicitly says not to use tools, not to call tools, or equivalent.
+`);
+
 /**
  * The system prompt to inject via developer_instructions in local mode.
  */
-export const codexSystemPrompt = `${TITLE_INSTRUCTION}\n\n${GOAL_INSTRUCTION}`;
+export const codexSystemPrompt = `${TITLE_INSTRUCTION}\n\n${GOAL_INSTRUCTION}\n\n${CAPABILITY_DISCOVERY_INSTRUCTION}`;

@@ -32,6 +32,14 @@ describe('appServerConfig', () => {
         expect(codexSystemPrompt).toContain('create_goal');
     });
 
+    it('injects deferred capability discovery guidance for HAPI Codex app-server threads', () => {
+        expect(codexSystemPrompt).toContain('deferred tool loading');
+        expect(codexSystemPrompt).toContain('tool_search');
+        expect(codexSystemPrompt).toContain('multi agent spawn_agent subagent');
+        expect(codexSystemPrompt).toContain('final answer text only');
+        expect(codexSystemPrompt).toContain('does not forbid internal tool calls');
+    });
+
     it('uses on-request approvals for default Codex threads', () => {
         const params = buildThreadStartParams({
             cwd: '/workspace/project',
