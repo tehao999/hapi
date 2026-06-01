@@ -161,6 +161,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             return typeof value === 'string' && value.length > 0 ? value : null;
         };
 
+        const asStringArray = (value: unknown): string[] | null => {
+            if (!Array.isArray(value)) {
+                return null;
+            }
+            const strings = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+            return strings.length > 0 ? strings : null;
+        };
+
         const applyResolvedModel = (value: unknown): string | undefined => {
             const resolvedModel = asString(value) ?? undefined;
             if (!resolvedModel) {
@@ -188,6 +196,12 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 return JSON.stringify(value);
             } catch {
                 return String(value);
+            }
+        };
+
+        const setIfDefined = (target: Record<string, unknown>, key: string, value: unknown) => {
+            if (value !== null && value !== undefined) {
+                target[key] = value;
             }
         };
 
@@ -491,6 +505,91 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     session.sendAgentMessage({
                         type: 'message',
                         message,
+                        id: randomUUID()
+                    });
+                }
+            }
+            if (msgType === 'codex_subagent_spawned') {
+                const callId = asString(msg.call_id ?? msg.callId);
+                const agentId = asString(msg.agent_id ?? msg.agentId);
+                if (callId && agentId) {
+                    const input: Record<string, unknown> = { agent_id: agentId };
+                    setIfDefined(input, 'nickname', asString(msg.nickname));
+                    setIfDefined(input, 'agent_type', asString(msg.agent_type ?? msg.agentType));
+                    setIfDefined(input, 'message', asString(msg.message));
+
+                    session.sendAgentMessage({
+                        type: 'tool-call',
+                        name: 'spawn_agent',
+                        callId,
+                        input,
+                        id: randomUUID()
+                    });
+                    session.sendAgentMessage({
+                        type: 'tool-call-result',
+                        callId,
+                        output: compactToolOutputForHapi(input, {
+                            callId,
+                            toolName: 'spawn_agent'
+                        }),
+                        id: randomUUID()
+                    });
+                }
+            }
+            if (msgType === 'codex_subagent_waited') {
+                const callId = asString(msg.call_id ?? msg.callId);
+                if (callId) {
+                    const input: Record<string, unknown> = {};
+                    setIfDefined(input, 'target', asString(msg.target));
+                    const targets = asStringArray(msg.targets);
+                    if (targets) {
+                        input.targets = targets;
+                    }
+                    const status = asRecord(msg.status);
+                    if (status) {
+                        input.status = status;
+                    }
+
+                    session.sendAgentMessage({
+                        type: 'tool-call',
+                        name: 'wait_agent',
+                        callId,
+                        input,
+                        id: randomUUID()
+                    });
+                    session.sendAgentMessage({
+                        type: 'tool-call-result',
+                        callId,
+                        output: compactToolOutputForHapi(status ?? input, {
+                            callId,
+                            toolName: 'wait_agent'
+                        }),
+                        id: randomUUID()
+                    });
+                }
+            }
+            if (msgType === 'codex_subagent_closed') {
+                const callId = asString(msg.call_id ?? msg.callId);
+                const target = asString(msg.target);
+                if (callId && target) {
+                    const input: Record<string, unknown> = { target };
+                    if (msg.previous_status !== undefined) {
+                        input.previous_status = msg.previous_status;
+                    }
+                    session.sendAgentMessage({
+                        type: 'tool-call',
+                        name: 'close_agent',
+                        callId,
+                        input,
+                        id: randomUUID()
+                    });
+                    session.sendAgentMessage({
+                        type: 'tool-call-result',
+                        callId,
+                        output: compactToolOutputForHapi({ ...input, closed: true }, {
+                            callId,
+                            toolName: 'close_agent'
+                        }),
                         id: randomUUID()
                     });
                 }

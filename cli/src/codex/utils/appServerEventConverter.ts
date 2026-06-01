@@ -5,6 +5,12 @@ type ConvertedEvent = {
     [key: string]: unknown;
 };
 
+type FunctionCallMeta = {
+    name: string;
+    namespace?: string;
+    input: Record<string, unknown> | null;
+};
+
 const BENIGN_NOTIFICATION_METHODS = new Set([
     'thread/status/changed',
     'thread/goal/updated',
@@ -37,6 +43,14 @@ function asNumber(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function asStringArray(value: unknown): string[] | null {
+    if (!Array.isArray(value)) {
+        return null;
+    }
+    const strings = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+    return strings.length > 0 ? strings : null;
+}
+
 function extractItemId(params: Record<string, unknown>): string | null {
     const direct = asString(params.itemId ?? params.item_id ?? params.id);
     if (direct) return direct;
@@ -58,6 +72,59 @@ function normalizeItemType(value: unknown): string | null {
     const raw = asString(value);
     if (!raw) return null;
     return raw.toLowerCase().replace(/[\s_-]/g, '');
+}
+
+function parseJsonValue(value: unknown): unknown {
+    if (typeof value !== 'string') {
+        return value;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+        return value;
+    }
+
+    try {
+        return JSON.parse(trimmed);
+    } catch (error) {
+        logger.debug('[AppServerEventConverter] Failed to parse JSON value:', error);
+        return value;
+    }
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> | null {
+    return asRecord(parseJsonValue(value));
+}
+
+function extractFunctionCallId(params: Record<string, unknown>, item: Record<string, unknown>): string | null {
+    return asString(
+        item.call_id ??
+        item.callId ??
+        item.tool_call_id ??
+        item.toolCallId ??
+        params.call_id ??
+        params.callId ??
+        params.tool_call_id ??
+        params.toolCallId
+    ) ?? extractItemId(params);
+}
+
+function normalizeFunctionName(value: string): string {
+    return value.includes('.') ? value.slice(value.lastIndexOf('.') + 1) : value;
+}
+
+function isCodexSubagentFunction(name: string, namespace: string | undefined): boolean {
+    const normalizedName = normalizeFunctionName(name);
+    if (normalizedName !== 'spawn_agent' && normalizedName !== 'wait_agent' && normalizedName !== 'close_agent') {
+        return false;
+    }
+    return !namespace || namespace === 'multi_agent_v1' || name.startsWith('multi_agent_v1.');
+}
+
+function maybeSet(target: Record<string, unknown>, key: string, value: unknown): void {
+    if (value !== null && value !== undefined) {
+        target[key] = value;
+    }
 }
 
 function extractCommand(value: unknown): string | null {
@@ -161,6 +228,7 @@ export class AppServerEventConverter {
     private readonly reasoningBuffers = new Map<string, string>();
     private readonly commandOutputBuffers = new Map<string, string>();
     private readonly commandMeta = new Map<string, Record<string, unknown>>();
+    private readonly functionCallMeta = new Map<string, FunctionCallMeta>();
     private readonly fileChangeMeta = new Map<string, Record<string, unknown>>();
     private readonly completedAgentMessageItems = new Set<string>();
     private readonly completedReasoningItems = new Set<string>();
@@ -513,6 +581,91 @@ export class AppServerEventConverter {
                 return events;
             }
 
+            if (itemType === 'functioncall') {
+                const name = asString(item.name ?? item.tool_name ?? item.toolName);
+                const callId = extractFunctionCallId(paramsRecord, item);
+                if (name && callId) {
+                    const namespace = asString(item.namespace ?? item.tool_namespace ?? item.toolNamespace) ?? undefined;
+                    this.functionCallMeta.set(callId, {
+                        name,
+                        namespace,
+                        input: parseJsonRecord(item.arguments ?? item.input ?? item.args)
+                    });
+                }
+                return events;
+            }
+
+            if (itemType === 'functioncalloutput') {
+                const callId = extractFunctionCallId(paramsRecord, item);
+                if (!callId) {
+                    return events;
+                }
+
+                const meta = this.functionCallMeta.get(callId);
+                const name = meta?.name ?? asString(item.name ?? item.tool_name ?? item.toolName);
+                const namespace = meta?.namespace ?? asString(item.namespace ?? item.tool_namespace ?? item.toolNamespace) ?? undefined;
+                this.functionCallMeta.delete(callId);
+
+                if (!name || !isCodexSubagentFunction(name, namespace)) {
+                    return events;
+                }
+
+                const input = meta?.input ?? {};
+                const output = parseJsonRecord(item.output ?? item.result ?? item.content) ?? {};
+                const normalizedName = normalizeFunctionName(name);
+
+                if (normalizedName === 'spawn_agent') {
+                    const agentId = asString(output.agent_id ?? output.agentId ?? output.id ?? input.agent_id ?? input.agentId);
+                    if (!agentId) {
+                        return events;
+                    }
+
+                    const event: ConvertedEvent = {
+                        type: 'codex_subagent_spawned',
+                        call_id: callId,
+                        agent_id: agentId
+                    };
+                    maybeSet(event, 'nickname', asString(output.nickname ?? output.name ?? input.nickname));
+                    maybeSet(event, 'agent_type', asString(input.agent_type ?? input.agentType ?? output.agent_type ?? output.agentType));
+                    maybeSet(event, 'message', asString(input.message ?? input.prompt ?? input.description));
+                    events.push(event);
+                    return events;
+                }
+
+                if (normalizedName === 'wait_agent') {
+                    const event: ConvertedEvent = {
+                        type: 'codex_subagent_waited',
+                        call_id: callId
+                    };
+                    maybeSet(event, 'target', asString(input.target ?? input.agent_id ?? input.agentId));
+                    const targets = asStringArray(input.targets ?? input.agent_ids ?? input.agentIds);
+                    if (targets) {
+                        event.targets = targets;
+                    }
+                    const status = parseJsonRecord(output.status ?? item.status);
+                    if (status) {
+                        event.status = status;
+                    }
+                    events.push(event);
+                    return events;
+                }
+
+                if (normalizedName === 'close_agent') {
+                    const target = asString(input.target ?? input.agent_id ?? input.agentId);
+                    if (!target) {
+                        return events;
+                    }
+                    events.push({
+                        type: 'codex_subagent_closed',
+                        call_id: callId,
+                        target,
+                        ...(output.previous_status !== undefined ? { previous_status: output.previous_status } : {}),
+                        ...(output.previousStatus !== undefined ? { previous_status: output.previousStatus } : {})
+                    });
+                    return events;
+                }
+            }
+
             if (itemType === 'contextcompaction') {
                 const threadId = asString(paramsRecord.threadId ?? paramsRecord.thread_id);
                 const turnId = asString(paramsRecord.turnId ?? paramsRecord.turn_id);
@@ -583,6 +736,7 @@ export class AppServerEventConverter {
         this.reasoningBuffers.clear();
         this.commandOutputBuffers.clear();
         this.commandMeta.clear();
+        this.functionCallMeta.clear();
         this.fileChangeMeta.clear();
         this.completedAgentMessageItems.clear();
         this.completedReasoningItems.clear();

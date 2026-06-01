@@ -37,6 +37,7 @@ const harness = vi.hoisted(() => ({
     emitContextCompactionBeforeCompletion: false,
     emitLargeToolOutputBeforeCompletion: false,
     emitLargeMcpOutputBeforeCompletion: false,
+    emitCodexSubagentLifecycleBeforeCompletion: false,
     emitAutoContextCompactionBeforeCompletion: false,
     delayAfterAutoContextCompactionMs: 0
 }));
@@ -129,6 +130,114 @@ vi.mock('./codexAppServerClient', () => {
                 this.notificationHandler?.('codex/event/mcp_tool_call_begin', startedMcp);
                 harness.notifications.push({ method: 'codex/event/mcp_tool_call_end', params: completedMcp });
                 this.notificationHandler?.('codex/event/mcp_tool_call_end', completedMcp);
+            }
+
+            if (harness.emitCodexSubagentLifecycleBeforeCompletion) {
+                const spawnCall = {
+                    msg: {
+                        type: 'item_completed',
+                        item_id: 'call-spawn',
+                        item: {
+                            id: 'call-spawn',
+                            type: 'function_call',
+                            namespace: 'multi_agent_v1',
+                            name: 'spawn_agent',
+                            call_id: 'call-spawn',
+                            arguments: JSON.stringify({
+                                agent_type: 'default',
+                                message: 'Review the HAPI diff'
+                            })
+                        }
+                    }
+                };
+                const spawnOutput = {
+                    msg: {
+                        type: 'item_completed',
+                        item_id: 'out-spawn',
+                        item: {
+                            id: 'out-spawn',
+                            type: 'function_call_output',
+                            call_id: 'call-spawn',
+                            output: JSON.stringify({
+                                agent_id: 'agent-1',
+                                nickname: 'Boyle'
+                            })
+                        }
+                    }
+                };
+                harness.notifications.push({ method: 'codex/event/item_completed', params: spawnCall });
+                this.notificationHandler?.('codex/event/item_completed', spawnCall);
+                harness.notifications.push({ method: 'codex/event/item_completed', params: spawnOutput });
+                this.notificationHandler?.('codex/event/item_completed', spawnOutput);
+
+                const waitCall = {
+                    msg: {
+                        type: 'item_completed',
+                        item_id: 'call-wait',
+                        item: {
+                            id: 'call-wait',
+                            type: 'function_call',
+                            namespace: 'multi_agent_v1',
+                            name: 'wait_agent',
+                            call_id: 'call-wait',
+                            arguments: JSON.stringify({
+                                targets: ['agent-1'],
+                                timeout_ms: 30000
+                            })
+                        }
+                    }
+                };
+                const waitOutput = {
+                    msg: {
+                        type: 'item_completed',
+                        item_id: 'out-wait',
+                        item: {
+                            id: 'out-wait',
+                            type: 'function_call_output',
+                            call_id: 'call-wait',
+                            output: JSON.stringify({
+                                status: {},
+                                timed_out: true
+                            })
+                        }
+                    }
+                };
+                const closeCall = {
+                    msg: {
+                        type: 'item_completed',
+                        item_id: 'call-close',
+                        item: {
+                            id: 'call-close',
+                            type: 'function_call',
+                            namespace: 'multi_agent_v1',
+                            name: 'close_agent',
+                            call_id: 'call-close',
+                            arguments: JSON.stringify({ target: 'agent-1' })
+                        }
+                    }
+                };
+                const closeOutput = {
+                    msg: {
+                        type: 'item_completed',
+                        item_id: 'out-close',
+                        item: {
+                            id: 'out-close',
+                            type: 'function_call_output',
+                            call_id: 'call-close',
+                            output: JSON.stringify({
+                                previous_status: { completed: 'Done.' }
+                            })
+                        }
+                    }
+                };
+                harness.notifications.push({ method: 'codex/event/item_completed', params: waitCall });
+                this.notificationHandler?.('codex/event/item_completed', waitCall);
+                harness.notifications.push({ method: 'codex/event/item_completed', params: waitOutput });
+                this.notificationHandler?.('codex/event/item_completed', waitOutput);
+                harness.notifications.push({ method: 'codex/event/item_completed', params: closeCall });
+                this.notificationHandler?.('codex/event/item_completed', closeCall);
+                harness.notifications.push({ method: 'codex/event/item_completed', params: closeOutput });
+                this.notificationHandler?.('codex/event/item_completed', closeOutput);
             }
 
             if (harness.emitAutoContextCompactionBeforeCompletion) {
@@ -454,6 +563,7 @@ describe('codexRemoteLauncher', () => {
         harness.emitContextCompactionBeforeCompletion = false;
         harness.emitLargeToolOutputBeforeCompletion = false;
         harness.emitLargeMcpOutputBeforeCompletion = false;
+        harness.emitCodexSubagentLifecycleBeforeCompletion = false;
         harness.emitAutoContextCompactionBeforeCompletion = false;
         harness.delayAfterAutoContextCompactionMs = 0;
         vi.restoreAllMocks();
@@ -574,6 +684,55 @@ describe('codexRemoteLauncher', () => {
                 truncated: true,
                 callId: 'mcp-large',
                 toolName: 'mcp__browser__open'
+            })
+        }));
+    });
+
+    it('persists Codex subagent lifecycle calls for HAPI team tracking', async () => {
+        harness.emitCodexSubagentLifecycleBeforeCompletion = true;
+        const {
+            session,
+            codexMessages
+        } = createSessionStub();
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'tool-call',
+            name: 'spawn_agent',
+            callId: 'call-spawn',
+            input: expect.objectContaining({
+                agent_id: 'agent-1',
+                nickname: 'Boyle',
+                agent_type: 'default',
+                message: 'Review the HAPI diff'
+            })
+        }));
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'tool-call-result',
+            callId: 'call-spawn',
+            output: expect.objectContaining({
+                agent_id: 'agent-1',
+                nickname: 'Boyle'
+            })
+        }));
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'tool-call',
+            name: 'wait_agent',
+            callId: 'call-wait',
+            input: expect.objectContaining({
+                targets: ['agent-1'],
+                status: {}
+            })
+        }));
+        expect(codexMessages).toContainEqual(expect.objectContaining({
+            type: 'tool-call',
+            name: 'close_agent',
+            callId: 'call-close',
+            input: expect.objectContaining({
+                target: 'agent-1',
+                previous_status: { completed: 'Done.' }
             })
         }));
     });

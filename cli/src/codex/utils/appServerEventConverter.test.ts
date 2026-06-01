@@ -249,6 +249,149 @@ describe('AppServerEventConverter', () => {
         expect(completed).toEqual([{ type: 'agent_message', message: 'Hello world' }]);
     });
 
+    it('emits a merged lifecycle event when a Codex subagent is spawned', () => {
+        const converter = new AppServerEventConverter();
+
+        const started = converter.handleNotification('codex/event/item_completed', {
+            msg: {
+                type: 'item_completed',
+                item_id: 'call-spawn',
+                item: {
+                    id: 'call-spawn',
+                    type: 'function_call',
+                    namespace: 'multi_agent_v1',
+                    name: 'spawn_agent',
+                    call_id: 'call-spawn',
+                    arguments: JSON.stringify({
+                        agent_type: 'default',
+                        message: 'Review the HAPI diff'
+                    })
+                }
+            }
+        });
+        const completed = converter.handleNotification('codex/event/item_completed', {
+            msg: {
+                type: 'item_completed',
+                item_id: 'out-spawn',
+                item: {
+                    id: 'out-spawn',
+                    type: 'function_call_output',
+                    call_id: 'call-spawn',
+                    output: JSON.stringify({
+                        agent_id: 'agent-1',
+                        nickname: 'Boyle'
+                    })
+                }
+            }
+        });
+
+        expect(started).toEqual([]);
+        expect(completed).toEqual([{
+            type: 'codex_subagent_spawned',
+            call_id: 'call-spawn',
+            agent_id: 'agent-1',
+            nickname: 'Boyle',
+            agent_type: 'default',
+            message: 'Review the HAPI diff'
+        }]);
+    });
+
+    it('emits lifecycle events when Codex subagents are waited for and closed', () => {
+        const converter = new AppServerEventConverter();
+
+        converter.handleNotification('item/completed', {
+            item: {
+                id: 'call-wait',
+                type: 'function_call',
+                namespace: 'multi_agent_v1',
+                name: 'wait_agent',
+                call_id: 'call-wait',
+                arguments: JSON.stringify({ targets: ['agent-1'] })
+            }
+        });
+        const waited = converter.handleNotification('item/completed', {
+            item: {
+                id: 'out-wait',
+                type: 'function_call_output',
+                call_id: 'call-wait',
+                output: JSON.stringify({
+                    status: {
+                        'agent-1': { completed: 'Looks good.' }
+                    }
+                })
+            }
+        });
+
+        converter.handleNotification('item/completed', {
+            item: {
+                id: 'call-close',
+                type: 'function_call',
+                namespace: 'multi_agent_v1',
+                name: 'close_agent',
+                call_id: 'call-close',
+                arguments: JSON.stringify({ target: 'agent-1' })
+            }
+        });
+        const closed = converter.handleNotification('item/completed', {
+            item: {
+                id: 'out-close',
+                type: 'function_call_output',
+                call_id: 'call-close',
+                output: JSON.stringify({
+                    previous_status: { completed: 'Looks good.' }
+                })
+            }
+        });
+
+        expect(waited).toEqual([{
+            type: 'codex_subagent_waited',
+            call_id: 'call-wait',
+            targets: ['agent-1'],
+            status: {
+                'agent-1': { completed: 'Looks good.' }
+            }
+        }]);
+        expect(closed).toEqual([{
+            type: 'codex_subagent_closed',
+            call_id: 'call-close',
+            target: 'agent-1',
+            previous_status: { completed: 'Looks good.' }
+        }]);
+    });
+
+    it('preserves wait_agent targets even when the wait output status is empty', () => {
+        const converter = new AppServerEventConverter();
+
+        converter.handleNotification('item/completed', {
+            item: {
+                id: 'call-wait-timeout',
+                type: 'function_call',
+                namespace: 'multi_agent_v1',
+                name: 'wait_agent',
+                call_id: 'call-wait-timeout',
+                arguments: JSON.stringify({
+                    targets: ['agent-1', 'agent-2'],
+                    timeout_ms: 30000
+                })
+            }
+        });
+        const waited = converter.handleNotification('item/completed', {
+            item: {
+                id: 'out-wait-timeout',
+                type: 'function_call_output',
+                call_id: 'call-wait-timeout',
+                output: JSON.stringify({ status: {}, timed_out: true })
+            }
+        });
+
+        expect(waited).toEqual([{
+            type: 'codex_subagent_waited',
+            call_id: 'call-wait-timeout',
+            targets: ['agent-1', 'agent-2'],
+            status: {}
+        }]);
+    });
+
     it('unwraps codex/event reasoning completion from summary text', () => {
         const converter = new AppServerEventConverter();
 
