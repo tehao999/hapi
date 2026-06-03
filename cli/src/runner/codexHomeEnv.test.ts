@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, writeFile, lstat } from 'fs/promises'
 import { tmpdir } from 'os'
 import {
     ensureManagedCodexHome,
+    getRunnerBaseEnv,
     getManagedCodexBootstrapEntryNames,
     getManagedCodexHome,
     getRunnerAgentEnv
@@ -45,6 +46,16 @@ describe('managed Codex home env', () => {
         })
         expect(getRunnerAgentEnv('claude', { HOME: '/Users/tehao' })).not.toHaveProperty('HAPI_CLAUDE_PATH')
         expect(getRunnerAgentEnv('codex', { HOME: '/Users/tehao', HAPI_HOME: '/tmp/hapi-home' })).not.toHaveProperty('HAPI_CLAUDE_PATH')
+    })
+
+    it('prepends ~/.local/bin to runner-spawned agent PATH for every agent family', () => {
+        expect(getRunnerBaseEnv({ HOME: '/Users/tehao', PATH: '/usr/bin:/bin' })).toEqual({
+            PATH: '/Users/tehao/.local/bin:/usr/bin:/bin',
+        })
+
+        expect(getRunnerBaseEnv({ HOME: '/Users/tehao', PATH: '/usr/bin:/Users/tehao/.local/bin:/bin' })).toEqual({
+            PATH: '/usr/bin:/Users/tehao/.local/bin:/bin',
+        })
     })
 
     it('bootstraps only non-history Codex resources into the managed home', async () => {

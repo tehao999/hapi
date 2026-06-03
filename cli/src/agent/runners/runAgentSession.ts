@@ -14,6 +14,7 @@ import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
 import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
+import { applyHapiSessionEnvironment } from '@/agent/sessionEnvironment';
 
 function emitReadyIfIdle(props: {
     queueSize: () => number;
@@ -42,6 +43,7 @@ export async function runAgentSession(opts: {
         workingDirectory,
         agentState: initialState
     });
+    applyHapiSessionEnvironment(sessionInfo.id);
 
     session.updateAgentState((currentState) => ({
         ...currentState,

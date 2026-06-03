@@ -15,6 +15,7 @@ import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 import { getInvokedCwd } from '@/utils/invokedCwd';
+import { applyHapiSessionEnvironment } from '@/agent/sessionEnvironment';
 
 export async function runGemini(opts: {
     startedBy?: 'runner' | 'terminal';
@@ -43,13 +44,14 @@ export async function runGemini(opts: {
         ? undefined
         : runtimeConfig.model;
 
-    const { api, session } = await bootstrapSession({
+    const { api, session, sessionInfo } = await bootstrapSession({
         flavor: 'gemini',
         startedBy,
         workingDirectory,
         agentState: initialState,
         model: persistedModel
     });
+    applyHapiSessionEnvironment(sessionInfo.id);
 
     const startingMode: 'local' | 'remote' = opts.startingMode
         ?? (startedBy === 'runner' ? 'remote' : 'local');

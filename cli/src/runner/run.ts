@@ -23,6 +23,7 @@ import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { join } from 'path';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { hashRunnerCliApiToken } from './runnerIdentity';
+import { prependPathEntry } from '@/agent/sessionEnvironment';
 
 const MANAGED_CODEX_SHARED_ENTRY_NAMES = [
   'auth.json',
@@ -69,6 +70,13 @@ export function isClaudeDeepSeekAgent(agent: string | undefined): boolean {
 
 export function isClaudeFamilyAgent(agent: string | undefined): boolean {
   return agent === 'claude' || isClaudeDeepSeekAgent(agent);
+}
+
+export function getRunnerBaseEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const localBin = join(getUserHome(env), '.local', 'bin');
+  return {
+    PATH: prependPathEntry(env.PATH, localBin)
+  };
 }
 
 export function getRunnerAgentEnv(agent: string | undefined, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
@@ -477,6 +485,7 @@ export async function startRunner(): Promise<void> {
           stdio: ['ignore', 'pipe', 'pipe'],  // Capture stdout/stderr for debugging
           env: {
             ...process.env,
+            ...getRunnerBaseEnv(process.env),
             ...extraEnv
           }
         });

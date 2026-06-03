@@ -15,6 +15,7 @@ import { getInvokedCwd } from '@/utils/invokedCwd';
 import { parseSpecialCommand } from '@/parsers/specialCommands';
 import type { ReasoningEffort } from './appServerTypes';
 import type { CodexServiceTier } from '@hapi/protocol/types';
+import { applyHapiSessionEnvironment } from '@/agent/sessionEnvironment';
 
 export { emitReadyIfIdle } from './utils/emitReadyIfIdle';
 
@@ -37,7 +38,7 @@ export async function runCodex(opts: {
     let state: AgentState = {
         controlledByUser: false
     };
-    const { api, session } = await bootstrapSession({
+    const { api, session, sessionInfo } = await bootstrapSession({
         flavor: 'codex',
         startedBy,
         workingDirectory,
@@ -46,6 +47,7 @@ export async function runCodex(opts: {
         modelReasoningEffort: opts.modelReasoningEffort,
         serviceTier: opts.serviceTier
     });
+    applyHapiSessionEnvironment(sessionInfo.id);
 
     const startingMode: 'local' | 'remote' = startedBy === 'runner' ? 'remote' : 'local';
 

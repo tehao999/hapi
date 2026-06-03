@@ -70,6 +70,9 @@ maintenance notes), finish the slice instead of leaving task-created dirt behind
 - If the user requested review, or the change affects stability, routing, permissions, model
   selection, agent bridges, or maintenance policy, run external review before finalizing. Prefer
   Codex + Claude-DeepSeek when the user asks for the two-reviewer gate.
+- Runner-spawned agent sessions must expose local tool paths and stable session identity:
+  keep `~/.local/bin` on `PATH`, set `HAPI_SESSION_ID`, and use that id as the default
+  `CODEX_HANDOFF_CALLER_TAG` for handoff artifact attribution.
 - Read review results from the recorded artifact paths, fix any `FAIL`/`BLOCKED` findings, then
   rerun the relevant verification/review loop.
 - After verification and required review pass, commit the exact touched paths. Do not leave this

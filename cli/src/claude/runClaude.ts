@@ -20,6 +20,7 @@ import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 import { normalizeClaudeSessionModel } from './model';
 import { normalizeClaudeSessionEffort } from './effort';
 import { getInvokedCwd } from '@/utils/invokedCwd';
+import { applyHapiSessionEnvironment } from '@/agent/sessionEnvironment';
 
 export interface StartOptions {
     model?: string
@@ -61,6 +62,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         effort: initialEffort ?? undefined
     });
     logger.debug(`Session created: ${sessionInfo.id}`);
+    applyHapiSessionEnvironment(sessionInfo.id);
 
     // Extract SDK metadata in background and update session when ready
     extractSDKMetadataAsync(async (sdkMetadata) => {
