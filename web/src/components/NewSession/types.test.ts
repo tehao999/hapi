@@ -5,14 +5,18 @@ import { CLAUDE_EFFORT_OPTIONS, CODEX_SERVICE_TIER_OPTIONS, MODEL_OPTIONS } from
 describe('Claude model options', () => {
     it('matches the concise local Claude Code model menu', () => {
         expect(MODEL_OPTIONS.claude).toEqual([
-            { value: 'auto', label: 'Opus 4.8 · 1M' },
+            { value: 'auto', label: 'Default (Claude Code)' },
+            { value: 'fable', label: 'Fable 5 · 1M' },
+            { value: 'opus', label: 'Opus 4.8 · 1M' },
             { value: 'sonnet', label: 'Sonnet 4.6 · 200K' },
             { value: 'haiku', label: 'Haiku 4.5 · 200K' },
         ])
     })
 
     it('exposes friendly labels for Claude model presets', () => {
-        expect(CLAUDE_MODEL_PRESETS).toEqual(['sonnet', 'haiku'])
+        expect(CLAUDE_MODEL_PRESETS).toEqual(['fable', 'opus', 'sonnet', 'haiku'])
+        expect(getClaudeModelLabel('fable')).toBe('Fable 5 · 1M')
+        expect(getClaudeModelLabel('opus')).toBe('Opus 4.8 · 1M')
         expect(getClaudeModelLabel('sonnet')).toBe('Sonnet 4.6 · 200K')
         expect(getClaudeModelLabel('haiku')).toBe('Haiku 4.5 · 200K')
     })
@@ -22,8 +26,10 @@ describe('Claude effort options', () => {
     it('matches supported effort presets in expected order', () => {
         expect(CLAUDE_EFFORT_OPTIONS).toEqual([
             { value: 'auto', label: 'Auto' },
+            { value: 'low', label: 'Low' },
             { value: 'medium', label: 'Medium' },
             { value: 'high', label: 'High' },
+            { value: 'xhigh', label: 'XHigh' },
             { value: 'max', label: 'Max' },
         ])
     })

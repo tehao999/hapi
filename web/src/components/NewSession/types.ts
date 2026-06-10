@@ -1,16 +1,19 @@
 import {
+    CLAUDE_EFFORT_LABELS,
+    CLAUDE_EFFORT_PRESETS,
     CLAUDE_MODEL_PRESETS,
     DEFAULT_CLAUDE_MODEL_LABEL,
     GEMINI_MODEL_PRESETS,
     GEMINI_MODEL_LABELS,
     getClaudeModelLabel,
+    type ClaudeEffortPreset,
 } from '@hapi/protocol'
 
 export type AgentType = 'claude' | 'claude-deepseek' | 'codex' | 'cursor' | 'gemini' | 'opencode'
 export type SessionType = 'simple' | 'worktree'
 export type CodexReasoningEffort = 'default' | 'low' | 'medium' | 'high' | 'xhigh'
 export type CodexServiceTier = 'default' | 'standard' | 'fast'
-export type ClaudeEffort = 'auto' | 'medium' | 'high' | 'max'
+export type ClaudeEffort = 'auto' | ClaudeEffortPreset
 
 export const MODEL_OPTIONS: Record<AgentType, { value: string; label: string }[]> = {
     claude: [
@@ -53,7 +56,8 @@ export const CODEX_SERVICE_TIER_OPTIONS: { value: CodexServiceTier; label: strin
 
 export const CLAUDE_EFFORT_OPTIONS: { value: ClaudeEffort; label: string }[] = [
     { value: 'auto', label: 'Auto' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'high', label: 'High' },
-    { value: 'max', label: 'Max' },
+    ...CLAUDE_EFFORT_PRESETS.map(effort => ({
+        value: effort,
+        label: CLAUDE_EFFORT_LABELS[effort],
+    })),
 ]

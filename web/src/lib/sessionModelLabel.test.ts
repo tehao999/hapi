@@ -11,9 +11,14 @@ describe('getSessionModelLabel', () => {
     })
 
     it('renders friendly labels for known Claude aliases', () => {
+        expect(getSessionModelLabel({ model: 'fable' })).toEqual({
+            key: 'session.item.model',
+            value: 'Fable 5 · 1M'
+        })
+
         expect(getSessionModelLabel({ model: 'opus' })).toEqual({
             key: 'session.item.model',
-            value: DEFAULT_CLAUDE_MODEL_LABEL
+            value: 'Opus 4.8 · 1M'
         })
     })
 
@@ -112,6 +117,14 @@ describe('getSessionEffortLabel', () => {
         })).toEqual({
             key: 'session.item.effort',
             value: 'Max'
+        })
+
+        expect(getSessionEffortLabel({
+            metadata: { flavor: 'claude' },
+            effort: 'xhigh'
+        })).toEqual({
+            key: 'session.item.effort',
+            value: 'XHigh'
         })
     })
 

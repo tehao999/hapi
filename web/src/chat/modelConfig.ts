@@ -14,6 +14,15 @@ const CONTEXT_HEADROOM_TOKENS = 10_000
 const DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS = 200_000
 const LARGE_CLAUDE_CONTEXT_WINDOW_TOKENS = 1_000_000
 
+function normalizeModelForFamilyCheck(model: string): string {
+    return model.trim().toLowerCase().replace(/\[(1|2)m\]$/, '')
+}
+
+function isClaudeModelFamily(model: string, family: string): boolean {
+    const normalizedModel = normalizeModelForFamilyCheck(model)
+    return normalizedModel === family || normalizedModel.startsWith(`${family}-`)
+}
+
 export function getContextBudgetTokens(model: string | null | undefined, flavor?: string | null): number | null {
     if (flavor !== 'claude') {
         return null
@@ -22,6 +31,9 @@ export function getContextBudgetTokens(model: string | null | undefined, flavor?
     const trimmedModel = model?.trim()
     const windowTokens = (() => {
         if (!trimmedModel) {
+            return LARGE_CLAUDE_CONTEXT_WINDOW_TOKENS
+        }
+        if (trimmedModel === 'fable' || isClaudeModelFamily(trimmedModel, 'claude-fable-5')) {
             return LARGE_CLAUDE_CONTEXT_WINDOW_TOKENS
         }
         if (trimmedModel === 'opus' || trimmedModel.endsWith('[1m]')) {

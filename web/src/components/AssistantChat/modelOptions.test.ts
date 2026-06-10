@@ -11,10 +11,11 @@ describe('getModelOptionsForFlavor', () => {
 
     it('returns Claude model options for claude flavor', () => {
         const options = getModelOptionsForFlavor('claude')
-        expect(options[0]).toEqual({ value: null, label: 'Opus 4.8 · 1M' })
+        expect(options[0]).toEqual({ value: null, label: 'Default (Claude Code)' })
+        expect(options.some((o) => o.value === 'fable')).toBe(true)
+        expect(options.some((o) => o.value === 'opus')).toBe(true)
         expect(options.some((o) => o.value === 'sonnet')).toBe(true)
         expect(options.some((o) => o.value === 'haiku')).toBe(true)
-        expect(options.some((o) => o.value === 'opus')).toBe(false)
     })
 
     it('includes custom Gemini model from env/config in options', () => {

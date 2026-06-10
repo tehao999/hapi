@@ -1,4 +1,9 @@
-import { DEFAULT_CLAUDE_MODEL_LABEL, getClaudeModelLabel, supportsEffort } from '@hapi/protocol'
+import {
+    CLAUDE_EFFORT_LABELS as PROTOCOL_CLAUDE_EFFORT_LABELS,
+    DEFAULT_CLAUDE_MODEL_LABEL,
+    getClaudeModelLabel,
+    supportsEffort
+} from '@hapi/protocol'
 
 type SessionModelSource = {
     model?: string | null
@@ -37,9 +42,7 @@ const CODEX_SERVICE_TIER_LABELS: Record<string, string> = {
 
 const CLAUDE_EFFORT_LABELS: Record<string, string> = {
     auto: 'Auto',
-    medium: 'Medium',
-    high: 'High',
-    max: 'Max',
+    ...PROTOCOL_CLAUDE_EFFORT_LABELS,
 }
 
 function normalizeOptionalValue(value: string | null | undefined): string | null {

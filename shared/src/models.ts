@@ -1,16 +1,36 @@
-export const DEFAULT_CLAUDE_MODEL_LABEL = 'Opus 4.8 · 1M'
+export const DEFAULT_CLAUDE_MODEL_LABEL = 'Default (Claude Code)'
 
 export const CLAUDE_MODEL_LABELS = {
+    fable: 'Fable 5 · 1M',
+    'fable[1m]': 'Fable 5 · 1M',
+    'claude-fable-5': 'Fable 5 · 1M',
+    'claude-fable-5[1m]': 'Fable 5 · 1M',
     sonnet: 'Sonnet 4.6 · 200K',
+    'sonnet[1m]': 'Sonnet 4.6 · 1M',
+    'claude-sonnet-4-6': 'Sonnet 4.6 · 200K',
+    'claude-sonnet-4-6[1m]': 'Sonnet 4.6 · 1M',
     haiku: 'Haiku 4.5 · 200K',
-    opus: DEFAULT_CLAUDE_MODEL_LABEL,
-    'opus[1m]': DEFAULT_CLAUDE_MODEL_LABEL,
-    'sonnet[1m]': 'Sonnet · 1M'
+    'claude-haiku-4-5': 'Haiku 4.5 · 200K',
+    opus: 'Opus 4.8 · 1M',
+    'opus[1m]': 'Opus 4.8 · 1M',
+    'claude-opus-4-8': 'Opus 4.8 · 1M',
+    'claude-opus-4-8[1m]': 'Opus 4.8 · 1M'
 } as const
 
-export const CLAUDE_MODEL_PRESETS = ['sonnet', 'haiku'] as const
+export const CLAUDE_MODEL_PRESETS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export type ClaudeModelPreset = typeof CLAUDE_MODEL_PRESETS[number]
 const CLAUDE_MODEL_PRESET_SET = new Set<string>(CLAUDE_MODEL_PRESETS)
+
+export const CLAUDE_EFFORT_PRESETS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export type ClaudeEffortPreset = typeof CLAUDE_EFFORT_PRESETS[number]
+
+export const CLAUDE_EFFORT_LABELS: Record<ClaudeEffortPreset, string> = {
+    low: 'Low',
+    medium: 'Medium',
+    high: 'High',
+    xhigh: 'XHigh',
+    max: 'Max'
+}
 
 export const GEMINI_MODEL_LABELS = {
     'gemini-3.1-pro-preview': 'Gemini 3.1 Pro Preview',
@@ -34,5 +54,5 @@ export function getClaudeModelLabel(model: string): string | null {
         return null
     }
 
-    return CLAUDE_MODEL_LABELS[trimmedModel as ClaudeModelPreset] ?? null
+    return CLAUDE_MODEL_LABELS[trimmedModel as keyof typeof CLAUDE_MODEL_LABELS] ?? null
 }

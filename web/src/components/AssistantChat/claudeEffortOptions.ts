@@ -1,13 +1,8 @@
+import { CLAUDE_EFFORT_LABELS, CLAUDE_EFFORT_PRESETS } from '@hapi/protocol'
+
 export type ClaudeComposerEffortOption = {
     value: string | null
     label: string
-}
-
-const CLAUDE_EFFORT_PRESETS = ['medium', 'high', 'max'] as const
-const CLAUDE_EFFORT_LABELS: Record<(typeof CLAUDE_EFFORT_PRESETS)[number], string> = {
-    medium: 'Medium',
-    high: 'High',
-    max: 'Max'
 }
 
 function normalizeClaudeComposerEffort(effort?: string | null): string | null {

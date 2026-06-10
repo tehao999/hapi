@@ -48,7 +48,8 @@ vi.mock('@/agent/sessionFactory', () => ({
         harness.bootstrapArgs.push(options);
         return {
             api: {},
-            session: harness.session
+            session: harness.session,
+            sessionInfo: { id: 'test-codex-session' }
         };
     })
 }));

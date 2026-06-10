@@ -10,6 +10,12 @@ describe('getContextBudgetTokens', () => {
         expect(getContextBudgetTokens('sonnet', 'claude')).toBe(190_000)
     })
 
+    it('uses the large budget for Fable 5 model aliases and full model names', () => {
+        expect(getContextBudgetTokens('fable', 'claude')).toBe(990_000)
+        expect(getContextBudgetTokens('claude-fable-5', 'claude')).toBe(990_000)
+        expect(getContextBudgetTokens('claude-fable-5[1m]', 'claude')).toBe(990_000)
+    })
+
     it('uses the default Claude budget for full Claude model names', () => {
         expect(getContextBudgetTokens('claude-sonnet-4-6', 'claude')).toBe(190_000)
         expect(getContextBudgetTokens('claude-opus-4-80', 'claude')).toBe(190_000)
