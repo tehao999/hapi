@@ -7,6 +7,7 @@ const harness = vi.hoisted(() => ({
     registerRequestCalls: [] as string[],
     initializeCalls: [] as unknown[],
     startTurnCalls: [] as unknown[],
+    steerCalls: [] as unknown[],
     interruptCalls: [] as unknown[],
     compactCalls: [] as unknown[],
     goalGetCalls: [] as unknown[],
@@ -16,6 +17,7 @@ const harness = vi.hoisted(() => ({
     goalError: null as Error | null,
     mcpExtraTools: [] as Array<{ name: string; handler: (args: Record<string, unknown>) => Promise<unknown> }>,
     afterTurnStarted: null as null | (() => Promise<void> | void),
+    latestNotificationHandler: null as null | ((method: string, params: unknown) => void),
     emitTurnStartedDuringGoalSet: false,
     emitTurnStartedAfterGoalSet: false,
     compactError: null as Error | null,
@@ -55,6 +57,7 @@ vi.mock('./codexAppServerClient', () => {
 
         setNotificationHandler(handler: ((method: string, params: unknown) => void) | null): void {
             this.notificationHandler = handler;
+            harness.latestNotificationHandler = handler;
         }
 
         registerRequestHandler(method: string): void {
@@ -264,6 +267,14 @@ vi.mock('./codexAppServerClient', () => {
             this.notificationHandler?.('turn/completed', completed);
 
             return { turn: script?.responseTurnId ? { id: script.responseTurnId } : {} };
+        }
+
+        async steerTurn(params: unknown): Promise<{ turnId: string }> {
+            harness.steerCalls.push(params);
+            const expectedTurnId = typeof params === 'object' && params && 'expectedTurnId' in params
+                ? String((params as { expectedTurnId: unknown }).expectedTurnId)
+                : 'turn-live';
+            return { turnId: expectedTurnId };
         }
 
         async interruptTurn(params: unknown): Promise<Record<string, never>> {
@@ -539,6 +550,7 @@ describe('codexRemoteLauncher', () => {
         harness.registerRequestCalls = [];
         harness.initializeCalls = [];
         harness.startTurnCalls = [];
+        harness.steerCalls = [];
         harness.interruptCalls = [];
         harness.compactCalls = [];
         harness.goalGetCalls = [];
@@ -548,6 +560,7 @@ describe('codexRemoteLauncher', () => {
         harness.goalError = null;
         harness.mcpExtraTools = [];
         harness.afterTurnStarted = null;
+        harness.latestNotificationHandler = null;
         harness.emitTurnStartedDuringGoalSet = false;
         harness.emitTurnStartedAfterGoalSet = false;
         harness.compactError = null;
@@ -880,6 +893,61 @@ describe('codexRemoteLauncher', () => {
             thread_id: 'thread-anonymous'
         }));
         expect(sessionEvents.filter((event) => event.type === 'ready')).toHaveLength(1);
+    });
+
+    it('does not live-append queued messages after abort even if a late turn_started arrives before cleanup', async () => {
+        harness.turnScripts = [{
+            startedTurnId: 'active-turn',
+            responseTurnId: 'active-turn',
+            completionTurnId: 'active-turn'
+        }];
+        const { session, rpcHandlers } = createSessionStub();
+        const queue = new MessageQueue2<EnhancedMode>((mode) => JSON.stringify(mode));
+        session.queue = queue;
+        queue.push('initial prompt', createMode());
+        let pushedAfterAbort = false;
+        harness.afterTurnStarted = async () => {
+            if (pushedAfterAbort) return;
+            pushedAfterAbort = true;
+            await rpcHandlers.get('switch')?.({});
+            harness.latestNotificationHandler?.('turn/started', { turn: { id: 'late-turn-after-abort' } });
+            queue.push('late follow-up after abort', createMode());
+            queue.close();
+        };
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('switch');
+        expect(harness.steerCalls).toEqual([]);
+    });
+
+    it('live-appends matching normal user pushes into the active Codex turn instead of starting a second turn', async () => {
+        harness.turnScripts = [{
+            startedTurnId: 'turn-live',
+            responseTurnId: 'turn-live',
+            completionTurnId: 'turn-live'
+        }];
+        const { session } = createSessionStub();
+        const queue = new MessageQueue2<EnhancedMode>((mode) => JSON.stringify(mode));
+        session.queue = queue;
+        queue.push('initial prompt', createMode());
+        let pushedFollowUp = false;
+        harness.afterTurnStarted = () => {
+            if (pushedFollowUp) return;
+            pushedFollowUp = true;
+            queue.push('follow-up while active', createMode());
+            queue.close();
+        };
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.steerCalls).toEqual([{
+            threadId: 'thread-anonymous',
+            expectedTurnId: 'turn-live',
+            input: [{ type: 'text', text: 'follow-up while active' }]
+        }]);
+        expect(harness.startTurnCalls).toHaveLength(1);
     });
 
     it('runs native Codex compaction for /compact without starting a normal turn', async () => {

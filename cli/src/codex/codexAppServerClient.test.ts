@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { buildCodexAppServerArgs } from './codexAppServerClient';
+import { describe, expect, it, vi } from 'vitest';
+import { buildCodexAppServerArgs, CodexAppServerClient } from './codexAppServerClient';
 
 describe('buildCodexAppServerArgs', () => {
     it('uses the standard app-server command by default', () => {
@@ -61,5 +61,27 @@ describe('buildCodexAppServerArgs', () => {
         expect(() => buildCodexAppServerArgs({
             HAPI_CODEX_AUTO_COMPACT_TOKEN_LIMIT: '9007199254740992'
         })).toThrow('HAPI_CODEX_AUTO_COMPACT_TOKEN_LIMIT must be a positive integer');
+    });
+});
+
+
+describe('CodexAppServerClient', () => {
+    it('sends turn/steer with expectedTurnId to live-append into an active turn', async () => {
+        const client = new CodexAppServerClient();
+        const sendRequest = vi.spyOn(client as unknown as { sendRequest: (...args: unknown[]) => Promise<unknown> }, 'sendRequest')
+            .mockResolvedValue({ turnId: 'turn-123' });
+        const params = {
+            threadId: 'thread-123',
+            expectedTurnId: 'turn-123',
+            input: [{ type: 'text' as const, text: 'use the failing tests first' }]
+        };
+
+        const result = await (client as unknown as { steerTurn: (next: typeof params) => Promise<unknown> }).steerTurn(params);
+
+        expect(result).toEqual({ turnId: 'turn-123' });
+        expect(sendRequest).toHaveBeenCalledWith('turn/steer', params, {
+            signal: undefined,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
     });
 });

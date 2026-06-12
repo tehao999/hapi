@@ -139,6 +139,18 @@ export interface TurnStartResponse {
     [key: string]: unknown;
 }
 
+export interface TurnSteerParams {
+    threadId: string;
+    expectedTurnId: string;
+    input: UserInput[];
+    clientUserMessageId?: string;
+}
+
+export interface TurnSteerResponse {
+    turnId: string;
+    [key: string]: unknown;
+}
+
 export interface TurnInterruptParams {
     threadId: string;
     turnId: string;

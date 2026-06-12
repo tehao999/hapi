@@ -24,6 +24,7 @@ import {
     setCodexThreadGoalReplacingTerminal
 } from './utils/hapiGoalTools';
 import { parseSpecialCommand } from '@/parsers/specialCommands';
+import { createCodexLiveAppendQueueHandler } from './utils/liveAppendQueue';
 import {
     RemoteLauncherBase,
     type RemoteLauncherDisplayContext,
@@ -43,6 +44,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
     private abortController: AbortController = new AbortController();
     private currentThreadId: string | null = null;
     private currentTurnId: string | null = null;
+    private liveAppendTurnInFlight = false;
+    private liveAppendActiveModeHash: string | null = null;
     private titlePoller: { stop: () => void } | null = null;
 
     constructor(session: CodexSession) {
@@ -69,6 +72,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 }
             }
             this.currentTurnId = null;
+            this.resetLiveAppendState();
 
             this.abortController.abort();
             this.session.queue.reset();
@@ -81,6 +85,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         } finally {
             this.abortController = new AbortController();
         }
+    }
+
+    private resetLiveAppendState(): void {
+        this.liveAppendTurnInFlight = false;
+        this.liveAppendActiveModeHash = null;
     }
 
     private async handleExitFromUi(): Promise<void> {
@@ -408,6 +417,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 }
                 emitTurnDurationIfStarted(eventTurnId);
                 this.currentTurnId = null;
+                this.resetLiveAppendState();
                 allowAnonymousTerminalEvent = false;
                 if (
                     isManualContextCompacted ||
@@ -458,6 +468,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'task_started') {
                 clearReadyAfterTurnTimer?.();
                 turnInFlight = true;
+                if (this.liveAppendActiveModeHash) {
+                    this.liveAppendTurnInFlight = true;
+                }
                 if (!eventTurnId && !this.currentTurnId) {
                     allowAnonymousTerminalEvent = true;
                 }
@@ -860,6 +873,30 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             readyAfterTurnTimer.unref?.();
         };
 
+        session.queue.setOnMessage?.(createCodexLiveAppendQueueHandler({
+            queue: session.queue,
+            getActiveModeHash: () => this.liveAppendActiveModeHash,
+            getThreadId: () => this.currentThreadId,
+            getTurnId: () => this.currentTurnId,
+            isTurnInFlight: () => this.liveAppendTurnInFlight,
+            hasPendingPermission: () => permissionHandler.hasPendingRequests(),
+            isManualCompactionInFlight: () => manualCompactionInFlight,
+            isGoalCommandInFlight: () => goalCommandInFlight,
+            getSteer: () => async ({ threadId, expectedTurnId, message: nextMessage }) => {
+                const response = await appServerClient.steerTurn({
+                    threadId,
+                    expectedTurnId,
+                    input: [{ type: 'text', text: nextMessage }]
+                });
+                return !response.turnId || response.turnId === expectedTurnId;
+            },
+            log: (logMessage) => logger.debug(logMessage),
+            onAccepted: (next) => {
+                messageBuffer.addMessage(next.message, 'user');
+                logger.debug('[codexRemoteLauncher] live appended queued user message into active Codex turn');
+            }
+        }));
+
         while (!this.shouldExit) {
             logActiveHandles('loop-top');
             let message: QueuedMessage | null = pending;
@@ -1095,6 +1132,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     },
                     cliOverrides: session.codexCliOverrides
                 });
+                this.liveAppendActiveModeHash = message.hash;
+                this.liveAppendTurnInFlight = true;
                 turnInFlight = true;
                 allowAnonymousTerminalEvent = false;
                 startTurnDurationIfNeeded();
@@ -1117,6 +1156,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 logger.warn('Error in codex session:', error);
                 const isAbortError = error instanceof Error && error.name === 'AbortError';
                 turnInFlight = false;
+                this.resetLiveAppendState();
                 allowAnonymousTerminalEvent = false;
                 this.currentTurnId = null;
 
@@ -1133,6 +1173,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 emitTurnDurationIfStarted();
             } finally {
                 if (!turnInFlight) {
+                    this.resetLiveAppendState();
                     permissionHandler.reset();
                     reasoningProcessor.abort();
                     diffProcessor.reset();
@@ -1178,6 +1219,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
         this.titlePoller?.stop();
         this.titlePoller = null;
+
+        this.session.queue.setOnMessage?.(null);
 
         this.permissionHandler?.reset();
         this.reasoningProcessor?.abort();
