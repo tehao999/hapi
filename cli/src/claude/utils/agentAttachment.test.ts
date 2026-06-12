@@ -167,7 +167,25 @@ describe('buildAgentAttachments', () => {
         await expect(buildAgentAttachments([{ path: 'etc/hosts' }], '/')).rejects.toThrow(/filesystem root/i)
     })
 
-    it('rejects total payloads that would exceed the websocket-safe inline limit', async () => {
+    it('allows generated attachments larger than the previous 512KB inline limit', async () => {
+        const root = await tempRoot()
+        const previousLimitBytes = 512 * 1024
+        await writeFile(join(root, 'artifact.bin'), Buffer.alloc(previousLimitBytes + 1))
+
+        const attachments = await buildAgentAttachments([{ path: 'artifact.bin' }], root)
+
+        expect(attachments[0]).toMatchObject({
+            filename: 'artifact.bin',
+            mimeType: 'application/octet-stream',
+            size: previousLimitBytes + 1
+        })
+    })
+
+    it('sets the generated attachment payload limit to 30MB', () => {
+        expect(MAX_AGENT_ATTACHMENT_TOTAL_BYTES).toBe(30 * 1024 * 1024)
+    })
+
+    it('rejects total payloads that would exceed the 30MB inline limit', async () => {
         const root = await tempRoot()
         await writeFile(join(root, 'large.bin'), Buffer.alloc(MAX_AGENT_ATTACHMENT_TOTAL_BYTES + 1))
 

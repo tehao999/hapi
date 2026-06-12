@@ -11,8 +11,8 @@ export type AgentAttachmentFileInput = {
 }
 
 export const MAX_AGENT_ATTACHMENT_FILES = 3
-// Keep the JSON + base64 payload safely below socket.io's default 1MB frame limit.
-export const MAX_AGENT_ATTACHMENT_TOTAL_BYTES = 512 * 1024
+// Keep raw generated attachments to 30MB total; hub Socket.IO allows base64 transport headroom.
+export const MAX_AGENT_ATTACHMENT_TOTAL_BYTES = 30 * 1024 * 1024
 const MAX_AGENT_ATTACHMENT_READ_CHUNK_BYTES = 64 * 1024
 
 const MIME_BY_EXTENSION: Record<string, string> = {
