@@ -219,6 +219,10 @@ export abstract class BasePermissionHandler<TResponse extends { id: string }, TR
         }));
     }
 
+    hasPendingRequests(): boolean {
+        return this.pendingRequests.size > 0;
+    }
+
     protected finalizeRequest(id: string, completion: PermissionCompletion): void {
         this.client.updateAgentState((currentState) => {
             const request = currentState.requests?.[id];

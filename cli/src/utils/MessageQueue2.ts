@@ -1,10 +1,23 @@
 import { logger } from "@/ui/logger";
 
+export type MessageQueueMessageOrigin = 'push' | 'pushImmediate' | 'pushIsolateAndClear' | 'unshift';
+
 interface QueueItem<T> {
+    id: number;
     message: string;
     mode: T;
     modeHash: string;
     isolate?: boolean; // If true, this message must be processed alone
+    origin: MessageQueueMessageOrigin;
+}
+
+export interface MessageQueueItemSnapshot<T> {
+    id: number;
+    message: string;
+    mode: T;
+    hash: string;
+    isolate: boolean;
+    origin: MessageQueueMessageOrigin;
 }
 
 /**
@@ -15,12 +28,13 @@ export class MessageQueue2<T> {
     public queue: QueueItem<T>[] = []; // Made public for testing
     private waiter: ((hasMessages: boolean) => void) | null = null;
     private closed = false;
-    private onMessageHandler: ((message: string, mode: T) => void) | null = null;
+    private onMessageHandler: ((message: string, mode: T, item: MessageQueueItemSnapshot<T>) => void) | null = null;
+    private nextItemId = 1;
     modeHasher: (mode: T) => string;
 
     constructor(
         modeHasher: (mode: T) => string,
-        onMessageHandler: ((message: string, mode: T) => void) | null = null
+        onMessageHandler: ((message: string, mode: T, item: MessageQueueItemSnapshot<T>) => void) | null = null
     ) {
         this.modeHasher = modeHasher;
         this.onMessageHandler = onMessageHandler;
@@ -30,8 +44,30 @@ export class MessageQueue2<T> {
     /**
      * Set a handler that will be called when a message arrives
      */
-    setOnMessage(handler: ((message: string, mode: T) => void) | null): void {
+    setOnMessage(handler: ((message: string, mode: T, item: MessageQueueItemSnapshot<T>) => void) | null): void {
         this.onMessageHandler = handler;
+    }
+
+    private createItem(message: string, mode: T, modeHash: string, isolate: boolean, origin: MessageQueueMessageOrigin): QueueItem<T> {
+        return {
+            id: this.nextItemId++,
+            message,
+            mode,
+            modeHash,
+            isolate,
+            origin
+        };
+    }
+
+    private snapshot(item: QueueItem<T>): MessageQueueItemSnapshot<T> {
+        return {
+            id: item.id,
+            message: item.message,
+            mode: item.mode,
+            hash: item.modeHash,
+            isolate: item.isolate ?? false,
+            origin: item.origin
+        };
     }
 
     /**
@@ -45,16 +81,12 @@ export class MessageQueue2<T> {
         const modeHash = this.modeHasher(mode);
         logger.debug(`[MessageQueue2] push() called with mode hash: ${modeHash}`);
 
-        this.queue.push({
-            message,
-            mode,
-            modeHash,
-            isolate: false
-        });
+        const item = this.createItem(message, mode, modeHash, false, 'push');
+        this.queue.push(item);
 
         // Trigger message handler if set
         if (this.onMessageHandler) {
-            this.onMessageHandler(message, mode);
+            this.onMessageHandler(message, mode, this.snapshot(item));
         }
 
         // Notify waiter if any
@@ -80,16 +112,12 @@ export class MessageQueue2<T> {
         const modeHash = this.modeHasher(mode);
         logger.debug(`[MessageQueue2] pushImmediate() called with mode hash: ${modeHash}`);
 
-        this.queue.push({
-            message,
-            mode,
-            modeHash,
-            isolate: false
-        });
+        const item = this.createItem(message, mode, modeHash, false, 'pushImmediate');
+        this.queue.push(item);
 
         // Trigger message handler if set
         if (this.onMessageHandler) {
-            this.onMessageHandler(message, mode);
+            this.onMessageHandler(message, mode, this.snapshot(item));
         }
 
         // Notify waiter if any
@@ -119,16 +147,12 @@ export class MessageQueue2<T> {
         // Clear any pending messages to ensure this message is processed in complete isolation
         this.queue = [];
 
-        this.queue.push({
-            message,
-            mode,
-            modeHash,
-            isolate: true
-        });
+        const item = this.createItem(message, mode, modeHash, true, 'pushIsolateAndClear');
+        this.queue.push(item);
 
         // Trigger message handler if set
         if (this.onMessageHandler) {
-            this.onMessageHandler(message, mode);
+            this.onMessageHandler(message, mode, this.snapshot(item));
         }
 
         // Notify waiter if any
@@ -153,16 +177,12 @@ export class MessageQueue2<T> {
         const modeHash = this.modeHasher(mode);
         logger.debug(`[MessageQueue2] unshift() called with mode hash: ${modeHash}`);
 
-        this.queue.unshift({
-            message,
-            mode,
-            modeHash,
-            isolate: false
-        });
+        const item = this.createItem(message, mode, modeHash, false, 'unshift');
+        this.queue.unshift(item);
 
         // Trigger message handler if set
         if (this.onMessageHandler) {
-            this.onMessageHandler(message, mode);
+            this.onMessageHandler(message, mode, this.snapshot(item));
         }
 
         // Notify waiter if any
@@ -215,6 +235,22 @@ export class MessageQueue2<T> {
      */
     size(): number {
         return this.queue.length;
+    }
+
+    /**
+     * Remove and return the first queued message matching the predicate.
+     * Used by live-append paths that must consume exactly the queued item they
+     * forwarded into an already-open agent input stream.
+     */
+    takeFirstMatching(
+        predicate: (item: MessageQueueItemSnapshot<T>) => boolean
+    ): MessageQueueItemSnapshot<T> | null {
+        const index = this.queue.findIndex((item) => predicate(this.snapshot(item)));
+        if (index === -1) {
+            return null;
+        }
+        const [item] = this.queue.splice(index, 1);
+        return this.snapshot(item);
     }
 
     /**

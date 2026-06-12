@@ -12,6 +12,8 @@ import { PermissionResult } from "./sdk/types";
 import { getHapiBlobsDir } from "@/constants/uploadPaths";
 import { getDefaultClaudeCodePath } from "./sdk/utils";
 
+export type ClaudeLiveAppend = (next: { message: string, mode: EnhancedMode }) => boolean;
+
 export async function claudeRemote(opts: {
 
     // Fixed parameters
@@ -27,6 +29,7 @@ export async function claudeRemote(opts: {
 
     // Dynamic parameters
     nextMessage: () => Promise<{ message: string, mode: EnhancedMode } | null>,
+    registerLiveAppend?: (append: ClaudeLiveAppend) => void,
     onReady: () => void,
     isAborted: (toolCallId: string) => boolean,
 
@@ -154,14 +157,36 @@ export async function claudeRemote(opts: {
         }
     };
 
+    let turnStartedAt = Date.now();
+
     // Push initial message
     let messages = new PushableAsyncIterable<SDKUserMessage>();
+    let inputEnded = false;
     messages.push({
         type: 'user',
         message: {
             role: 'user',
             content: initial.message,
         },
+    });
+    opts.registerLiveAppend?.((next) => {
+        if (inputEnded || messages.done || opts.signal?.aborted) {
+            logger.debug(`${debugPrefix} live append rejected (inputEnded=${inputEnded}, done=${messages.done}, aborted=${Boolean(opts.signal?.aborted)})`);
+            return false;
+        }
+        mode = next.mode;
+        turnStartedAt = Date.now();
+        try {
+            messages.push({ type: 'user', message: { role: 'user', content: next.message } });
+            logger.debug(
+                `${debugPrefix} live append accepted ` +
+                `messageLength=${next.message.length} permissionMode=${next.mode.permissionMode}`
+            );
+            return true;
+        } catch (error) {
+            logger.debug(`${debugPrefix} live append failed`, error);
+            return false;
+        }
     });
 
     // Start the loop
@@ -171,11 +196,9 @@ export async function claudeRemote(opts: {
     });
 
     let nextMessageFetchInFlight = false;
-    let inputEnded = false;
     let nextMessageFetchSeq = 0;
     let streamMessageSeq = 0;
     let resultSeq = 0;
-    let turnStartedAt = Date.now();
 
     const extractResultDurationMs = (message: SDKMessage): number | null => {
         const raw = (message as Record<string, unknown>).duration_ms
@@ -213,6 +236,7 @@ export async function claudeRemote(opts: {
                 mode = next.mode;
                 turnStartedAt = Date.now();
                 messages.push({ type: 'user', message: { role: 'user', content: next.message } });
+                updateThinking(true);
                 logger.debug(
                     `${debugPrefix} nextMessage resolved fetchId=${fetchId} elapsedMs=${Date.now() - startedAt} ` +
                     `messageLength=${next.message.length} permissionMode=${next.mode.permissionMode}`

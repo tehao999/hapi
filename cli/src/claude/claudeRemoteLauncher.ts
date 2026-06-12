@@ -1,7 +1,7 @@
 import React from "react";
 import { Session } from "./session";
 import { RemoteModeDisplay } from "@/ui/ink/RemoteModeDisplay";
-import { claudeRemote } from "./claudeRemote";
+import { claudeRemote, type ClaudeLiveAppend } from "./claudeRemote";
 import { PermissionHandler } from "./utils/permissionHandler";
 import { Future } from "@/utils/future";
 import { SDKAssistantMessage, SDKMessage, SDKUserMessage } from "./sdk";
@@ -12,6 +12,7 @@ import { PLAN_FAKE_REJECT } from "./sdk/prompts";
 import { EnhancedMode } from "./loop";
 import { OutgoingMessageQueue } from "./utils/OutgoingMessageQueue";
 import type { ClaudePermissionMode } from "@hapi/protocol/types";
+import { createClaudeLiveAppendQueueHandler } from "./utils/liveAppendQueue";
 import {
     RemoteLauncherBase,
     type RemoteLauncherDisplayContext,
@@ -294,6 +295,22 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                 this.abortFuture = new Future<void>();
                 let modeHash: string | null = null;
                 let mode: EnhancedMode | null = null;
+                let activeLiveAppend: ClaudeLiveAppend | null = null;
+                let liveAppendThinking = false;
+
+                session.queue.setOnMessage(createClaudeLiveAppendQueueHandler({
+                    queue: session.queue,
+                    getActiveModeHash: () => modeHash,
+                    isThinking: () => liveAppendThinking,
+                    hasPendingPermission: () => permissionHandler.hasPendingRequests(),
+                    getAppend: () => activeLiveAppend,
+                    log: (logMessage) => logger.debug(logMessage),
+                    onAccepted: (next) => {
+                        permissionHandler.handleModeChange(next.mode.permissionMode);
+                        logger.debug('[claudeRemoteLauncher] live appended queued user message into active Claude turn');
+                    }
+                }));
+
                 try {
                     await claudeRemote({
                         sessionId: session.sessionId,
@@ -309,6 +326,8 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                             if (pending) {
                                 let p = pending;
                                 pending = null;
+                                modeHash = session.queue.modeHasher(p.mode);
+                                mode = p.mode;
                                 permissionHandler.handleModeChange(p.mode.permissionMode);
                                 return p;
                             }
@@ -335,7 +354,13 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                         onSessionFound: (sessionId) => {
                             session.onSessionFound(sessionId);
                         },
-                        onThinkingChange: session.onThinkingChange,
+                        registerLiveAppend: (append) => {
+                            activeLiveAppend = append;
+                        },
+                        onThinkingChange: (thinking) => {
+                            liveAppendThinking = thinking;
+                            session.onThinkingChange(thinking);
+                        },
                         onTurnDuration: (durationMs: number) => {
                             session.client.sendSessionEvent({ type: 'turn-duration', durationMs });
                         },
@@ -399,6 +424,9 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                     this.abortFuture = null;
                     logger.debug('[remote]: launch done');
                     permissionHandler.reset();
+                    session.queue.setOnMessage(null);
+                    activeLiveAppend = null;
+                    liveAppendThinking = false;
                     modeHash = null;
                     mode = null;
                 }

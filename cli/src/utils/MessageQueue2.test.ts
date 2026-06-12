@@ -401,10 +401,12 @@ describe('MessageQueue2', () => {
         
         // Manually add an isolated message without clearing (simulating edge case)
         queue.queue.push({
+            id: 999,
             message: 'isolated',
             mode: { type: 'A' },
             modeHash: 'A',
-            isolate: true
+            isolate: true,
+            origin: 'pushIsolateAndClear'
         });
         
         // Add more regular messages
@@ -455,5 +457,32 @@ describe('MessageQueue2', () => {
         const batch3 = await queue.waitForMessagesAndGetAsString();
         expect(batch3?.message).toBe('after-isolated');
         expect(batch3?.mode.type).toBe('B');
+    });
+
+    it('should remove and return the first queued item that matches a predicate', async () => {
+        const queue = new MessageQueue2<{ type: string }>((mode) => mode.type);
+
+        queue.push('first', { type: 'A' });
+        queue.push('second', { type: 'B' });
+        queue.push('third', { type: 'A' });
+
+        const removed = queue.takeFirstMatching((item) =>
+            item.message === 'second'
+            && item.hash === 'B'
+            && item.isolate === false
+        );
+
+        expect(removed).toEqual({
+            id: 2,
+            message: 'second',
+            mode: { type: 'B' },
+            hash: 'B',
+            isolate: false,
+            origin: 'push'
+        });
+
+        const batch = await queue.waitForMessagesAndGetAsString();
+        expect(batch?.message).toBe('first\nthird');
+        expect(batch?.mode.type).toBe('A');
     });
 });
