@@ -6,17 +6,13 @@
  * `mcp__hapi__change_title`.
  */
 
-import { trimIdent } from '@/utils/trimIdent';
+import { buildTitleInstruction } from '@/utils/titleInstruction';
 
 /**
- * Title instruction for Gemini to call the hapi MCP tool.
+ * Title instruction for Gemini.
+ * ACP exposes tools as mcp__<server>__<tool> → mcp__hapi__change_title.
  */
-export const TITLE_INSTRUCTION = trimIdent(`
-    ALWAYS when you start a new chat, call the title tool to set a concise task title.
-    Prefer calling mcp__hapi__change_title.
-    If that exact tool name is unavailable, call an equivalent alias such as hapi__change_title or hapi_change_title.
-    If the task focus changes significantly later, call the title tool again with a better title.
-`);
+export const TITLE_INSTRUCTION = buildTitleInstruction('mcp__hapi__change_title');
 
 /**
  * The system prompt to inject on the first user prompt for Gemini sessions.
