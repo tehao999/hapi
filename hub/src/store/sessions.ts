@@ -20,6 +20,7 @@ type DbSessionRow = {
     model_reasoning_effort: string | null
     service_tier: string | null
     effort: string | null
+    permission_mode: string | null
     todos: string | null
     todos_updated_at: number | null
     team_state: string | null
@@ -45,6 +46,7 @@ function toStoredSession(row: DbSessionRow): StoredSession {
         modelReasoningEffort: row.model_reasoning_effort,
         serviceTier: row.service_tier,
         effort: row.effort,
+        permissionMode: row.permission_mode,
         todos: safeJsonParse(row.todos),
         todosUpdatedAt: row.todos_updated_at,
         teamState: safeJsonParse(row.team_state),
@@ -399,6 +401,39 @@ export function setSessionEffort(
             id,
             namespace,
             effort,
+            updated_at: now,
+            touch_updated_at: touchUpdatedAt ? 1 : 0
+        })
+
+        return result.changes === 1
+    } catch {
+        return false
+    }
+}
+
+export function setSessionPermissionMode(
+    db: Database,
+    id: string,
+    permissionMode: string | null,
+    namespace: string,
+    options?: { touchUpdatedAt?: boolean }
+): boolean {
+    const now = Date.now()
+    const touchUpdatedAt = options?.touchUpdatedAt === true
+
+    try {
+        const result = db.prepare(`
+            UPDATE sessions
+            SET permission_mode = @permission_mode,
+                updated_at = CASE WHEN @touch_updated_at = 1 THEN @updated_at ELSE updated_at END,
+                seq = seq + 1
+            WHERE id = @id
+              AND namespace = @namespace
+              AND permission_mode IS NOT @permission_mode
+        `).run({
+            id,
+            namespace,
+            permission_mode: permissionMode,
             updated_at: now,
             touch_updated_at: touchUpdatedAt ? 1 : 0
         })

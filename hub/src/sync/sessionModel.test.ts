@@ -215,6 +215,72 @@ describe('session model', () => {
         expect(merged?.model).toBe('gpt-5.4')
     })
 
+    it('preserves permissionMode from old session when merging into resumed session', async () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const oldSession = cache.getOrCreateSession(
+            'session-perm-old',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+        store.sessions.setSessionPermissionMode(oldSession.id, 'yolo', 'default')
+
+        const newSession = cache.getOrCreateSession(
+            'session-perm-new',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+
+        await cache.mergeSessions(oldSession.id, newSession.id, 'default')
+
+        const merged = cache.getSession(newSession.id)
+        expect(merged?.permissionMode).toBe('yolo')
+        expect(store.sessions.getSession(newSession.id)?.permissionMode).toBe('yolo')
+    })
+
+    it('persists applied session permissionMode updates', () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const session = cache.getOrCreateSession(
+            'session-perm-config',
+            { path: '/tmp/project', host: 'localhost', flavor: 'claude' },
+            null,
+            'default'
+        )
+
+        cache.applySessionConfig(session.id, { permissionMode: 'bypassPermissions' })
+        expect(cache.getSession(session.id)?.permissionMode).toBe('bypassPermissions')
+        expect(store.sessions.getSession(session.id)?.permissionMode).toBe('bypassPermissions')
+    })
+
+    it('persists keepalive permissionMode to the store so it survives an archived restart', () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const session = cache.getOrCreateSession(
+            'session-perm-heartbeat',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            null,
+            'default'
+        )
+
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now(),
+            thinking: false,
+            permissionMode: 'yolo'
+        })
+
+        expect(store.sessions.getSession(session.id)?.permissionMode).toBe('yolo')
+    })
+
     it('persists applied session model updates, including clear-to-auto', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

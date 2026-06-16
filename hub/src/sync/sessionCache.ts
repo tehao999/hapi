@@ -150,7 +150,7 @@ export class SessionCache {
             modelReasoningEffort: stored.modelReasoningEffort,
             serviceTier: stored.serviceTier as CodexServiceTier | null,
             effort: stored.effort,
-            permissionMode: existing?.permissionMode,
+            permissionMode: (stored.permissionMode as PermissionMode | null) ?? undefined,
             collaborationMode: existing?.collaborationMode
         }
 
@@ -198,6 +198,11 @@ export class SessionCache {
         session.thinking = Boolean(payload.thinking)
         session.thinkingAt = t
         if (payload.permissionMode !== undefined) {
+            if (payload.permissionMode !== session.permissionMode) {
+                this.store.sessions.setSessionPermissionMode(payload.sid, payload.permissionMode, session.namespace, {
+                    touchUpdatedAt: false
+                })
+            }
             session.permissionMode = payload.permissionMode
         }
         if (payload.model !== undefined) {
@@ -336,6 +341,14 @@ export class SessionCache {
         }
 
         if (config.permissionMode !== undefined) {
+            if (config.permissionMode !== session.permissionMode) {
+                const updated = this.store.sessions.setSessionPermissionMode(sessionId, config.permissionMode, session.namespace, {
+                    touchUpdatedAt: false
+                })
+                if (!updated) {
+                    throw new Error('Failed to update session permission mode')
+                }
+            }
             session.permissionMode = config.permissionMode
         }
         if (config.model !== undefined) {
@@ -544,6 +557,15 @@ export class SessionCache {
             })
             if (!updated) {
                 throw new Error('Failed to preserve session effort during merge')
+            }
+        }
+
+        if (newStored.permissionMode === null && oldStored.permissionMode !== null) {
+            const updated = this.store.sessions.setSessionPermissionMode(newSessionId, oldStored.permissionMode, namespace, {
+                touchUpdatedAt: false
+            })
+            if (!updated) {
+                throw new Error('Failed to preserve session permission mode during merge')
             }
         }
 

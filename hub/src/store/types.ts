@@ -13,6 +13,7 @@ export type StoredSession = {
     modelReasoningEffort: string | null
     serviceTier: string | null
     effort: string | null
+    permissionMode: string | null
     todos: unknown | null
     todosUpdatedAt: number | null
     teamState: unknown | null
